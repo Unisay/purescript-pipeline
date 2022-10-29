@@ -1,6 +1,26 @@
-{ name = "my-project"
+{ name = "purescript-pipeline"
 , dependencies =
-  [ "aff", "console", "custom-prelude", "effect", "prelude", "spec" ]
+  [ "aff"
+  , "arrays"
+  , "bifunctors"
+  , "console"
+  , "control"
+  , "custom-prelude"
+  , "effect"
+  , "exceptions"
+  , "foldable-traversable"
+  , "freet"
+  , "functions"
+  , "functors"
+  , "identity"
+  , "newtype"
+  , "parallel"
+  , "prelude"
+  , "spec"
+  , "tailrec"
+  , "transformers"
+  , "tuples"
+  ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]
 }
