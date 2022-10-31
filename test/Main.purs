@@ -3,7 +3,18 @@ module Test.Main where
 import Custom.Prelude
 
 import Control.Alternative (guard)
-import Control.Coroutine (Consumer, Producer, Transducer, await, awaitT, emit, liftStateless, producerIterate, runProducerConsumer, yieldT)
+import Control.Coroutine
+  ( Consumer
+  , Producer
+  , Transducer
+  , await
+  , awaitT
+  , emit
+  , producerIterate
+  , runProducerConsumer
+  , transduceAll
+  , yieldT
+  )
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Rec.Class (forever)
 import Data.Tuple.Nested ((/\))
@@ -73,7 +84,7 @@ testRunProducerConsumer2 = do
 -- Transducer tests ------------------------------------------------------------
 
 double ∷ ∀ a m. Monad m ⇒ Transducer a a m Unit
-double = liftStateless \a → [ a, a ]
+double = transduceAll \a → [ a, a ]
 
 doubleTrouble ∷ ∀ a m. Show a ⇒ MonadEffect m ⇒ Transducer a a m Unit
 doubleTrouble = awaitT >>= case _ of

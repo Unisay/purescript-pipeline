@@ -203,25 +203,32 @@ yieldT b = suspend (Supply (produce b pass))
 awaitT ∷ ∀ m a b. Monad m ⇒ Transducer a b m (Maybe a)
 awaitT = suspend (Demand (Consume pure))
 
+awaitJustT ∷ ∀ i m o. Monad m ⇒ Transducer i o m i
+awaitJustT = unit # tailRecM \_ →
+  suspend (Demand (Consume pure)) <#> maybe (Loop unit) Done
+
 liftT ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
 liftT f = awaitT >>= maybe pass \a → yieldT (f a) *> liftT f
 
-liftStateless ∷ ∀ m a b. Monad m ⇒ (a → Array b) → Transducer a b m Unit
-liftStateless f =
-  awaitT >>= maybe pass \a → traverse yieldT (f a) *> liftStateless f
+transduceAll ∷ ∀ m a b. Monad m ⇒ (a → Array b) → Transducer a b m Unit
+transduceAll f =
+  awaitT >>= maybe pass \a → traverse yieldT (f a) *> transduceAll f
 
-liftStateful
+transduce ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
+transduce f = awaitT >>= maybe pass \a → yieldT (f a) *> transduce f
+
+transduceWithState
   ∷ ∀ m a b s
   . Monad m
   ⇒ (s → a → s /\ Array b)
   → (s → Array b)
   → s
   → Transducer a b m Unit
-liftStateful step eof state = awaitT >>= case _ of
+transduceWithState step eof state = awaitT >>= case _ of
   Nothing → for_ (eof state) yieldT
   Just a → do
     let nextState /\ bs = step state a
-    for_ bs yieldT *> liftStateful step eof nextState
+    for_ bs yieldT *> transduceWithState step eof nextState
 
 composeTransducers
   ∷ ∀ a b c m x y
