@@ -5,6 +5,7 @@ import Custom.Prelude
 import Control.Alternative (guard)
 import Control.Coroutine
   ( Consumer
+  , Fused(..)
   , Producer
   , Transducer
   , await
@@ -17,28 +18,42 @@ import Control.Coroutine
   )
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Rec.Class (forever)
-import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
 import Effect.Class (class MonadEffect)
 import Effect.Class.Console (log)
 import Test.Spec (describe, it)
-import Test.Spec.Assertions (shouldEqual)
+import Test.Spec.Assertions (fail, shouldEqual)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (runSpec)
 
 main ∷ Effect Unit
 main = launchAff_ $ runSpec [ consoleReporter ] do
-  describe "Coroutine Suite" do
-    it "testRunProducerConsumer" do
-      _ /\ result ← runProducerConsumer producer consumer
-      result `shouldEqual` 53
-    it "Process is stack safe" do
+  describe "runProducerConsumer" do
+    it "runs till result" do
+      runProducerConsumer producer consumer >>= case _ of
+        LeftEnded _ _ → fail "Producer ended"
+        RightEnded _ _ → fail "Consumer ended"
+        BothEnded _ result → result `shouldEqual` 53
+    it "handles premature producer" do
+      let badProducer = pass
+      runProducerConsumer badProducer consumer >>= case _ of
+        LeftEnded _ _ → pass
+        RightEnded _ _ → fail "Consumer ended"
+        BothEnded _ _ → fail "Both ended"
+    it "handles premature consumer" do
+      runProducerConsumer producer consumer >>= case _ of
+        LeftEnded _ _ → fail "Producer ended"
+        RightEnded _ _ → pass
+        BothEnded _ _ → fail "Both ended"
+    it "is stack safe" do
       let
         p = producerIterate 42 \i → pure $ guard (i < 100000) $> (i + 1)
         c = forever await
-      _x /\ _y ← runProducerConsumer p c
-      pass
+      runProducerConsumer p c >>= case _ of
+        LeftEnded _ _ → pass -- producer is expected to end first
+        RightEnded _ _ → fail "Consumer ended"
+        BothEnded _ _ → fail "Both ended"
 
 --------------------------------------------------------------------------------
 -- Producer/Consumer test ------------------------------------------------------
@@ -60,13 +75,6 @@ consumer = do
   log $ "Consumer: received second number: " <> show b
   pure $ a + b
 
-testPrematureProducer ∷ Aff Unit
-testPrematureProducer = do
-  let badProducer = pass
-  void $ runProducerConsumer badProducer consumer
-
--------- ^ Runtime Error: The producer ended too soon.
-
 consumer2 ∷ Consumer (Maybe Int) Aff (Maybe Int)
 consumer2 = runMaybeT do
   a ← log "Consumer: waiting for the first number..." *> MaybeT await
@@ -75,11 +83,6 @@ consumer2 = runMaybeT do
   log $ "Consumer: received second number: " <> show b
   pure $ a + b
 
-testRunProducerConsumer2 ∷ Aff Unit
-testRunProducerConsumer2 = do
-  _ /\ result ← runProducerConsumer pass consumer2
-  log $ "Sum is: " <> show result
-
 --------------------------------------------------------------------------------
 -- Transducer tests ------------------------------------------------------------
 
@@ -87,13 +90,11 @@ double ∷ ∀ a m. Monad m ⇒ Transducer a a m Unit
 double = transduceAll \a → [ a, a ]
 
 doubleTrouble ∷ ∀ a m. Show a ⇒ MonadEffect m ⇒ Transducer a a m Unit
-doubleTrouble = awaitT >>= case _ of
-  Nothing → pass
-  Just a → do
-    log $ "Yielding first copy (" <> show a <> ") ..."
-    yieldT a
-    log $ "Yielding second copy (" <> show a <> ") ..."
-    yieldT a
+doubleTrouble = awaitT >>= \a → do
+  log $ "Yielding first copy (" <> show a <> ") ..."
+  yieldT a
+  log $ "Yielding second copy (" <> show a <> ") ..."
+  yieldT a
 
 iter2 ∷ Int → Consumer (Maybe Int) Aff Unit
 iter2 s = do

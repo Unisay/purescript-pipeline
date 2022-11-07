@@ -8,6 +8,9 @@ import Data.Functor.Coproduct (Coproduct)
 
 newtype Consume a b = Consume (a → b)
 
+consume ∷ ∀ a b. Consume a b → a → b
+consume (Consume f) = f
+
 derive newtype instance Functor (Consume a)
 
 data Produce ∷ Type → Type → Type
@@ -33,15 +36,6 @@ type CoTransform output input a = Produce output (Consume input a)
 -- | A suspension functor that makes a coroutine which consumes an `input` 
 -- | and proceeds by supplying an `output`.
 type Transform output input a = Consume input (Produce output a)
-
--- | A suspension functor that makes a coroutine which can either input
--- | or output a value every time it suspends, but not both at the same time.
--- type Transduce input output = Coproduct (Function input) (Tuple output)
-data Transduce input output k
-  = Demand (Consume input k)
-  | Supply (Produce output k)
-
-derive instance Functor (Transduce d s)
 
 type Split a = Coproduct
   (Consume (Maybe a))

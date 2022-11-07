@@ -3,21 +3,24 @@ module Control.Coroutine where
 import Custom.Prelude
 
 import Control.Apply (applySecond, lift2)
-import Control.Coroutine.Functor (Consume(..), Join, Produce, Split, Transduce(..), produce, produce1, produce2)
-import Control.Monad.Except (ExceptT(..), runExceptT)
+import Control.Coroutine.Functor (Consume(..), Join, Produce, Split, consume, produce, produce1, produce2)
+import Control.Monad.Except (class MonadTrans, ExceptT(..), runExceptT)
 import Control.Monad.Free.Trans (FreeT, freeT, runFreeT)
 import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec, Step(..), loop2, tailRecM, tailRecM2)
 import Control.Monad.Trans.Class (lift)
 import Control.Parallel.Class (class Parallel, parallel, sequential)
 import Data.Array as Array
+import Data.Bifunctor (class Bifunctor)
+import Data.Either.Nested (type (\/))
 import Data.Foldable (class Foldable, foldl, foldr)
 import Data.Functor.Coproduct (left, right)
 import Data.Identity (Identity(..))
-import Data.Newtype (unwrap)
+import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Traversable (for_, traverse)
 import Data.Tuple (Tuple)
 import Data.Tuple.Nested (type (/\), (/\))
+import Effect.Class (class MonadEffect)
 import Effect.Exception.Unsafe (unsafeThrow)
 
 -- https://themonadreader.files.wordpress.com/2011/10/issue19.pdf
@@ -51,7 +54,10 @@ connect
   ⇒ Producer o m a
   → Consumer o m a
   → Process m a
-connect = fuseWith \f p (Consume c) → Identity (f (produce2 p) (c (produce1 p)))
+connect producer consumer =
+  fuseWith (\f p (Consume c) → Identity (f (produce2 p) (c (produce1 p))))
+    (unwrap producer)
+    (unwrap consumer)
 
 -- | Fuse two `Coroutine`s.
 fuseWith
@@ -71,14 +77,13 @@ fuseWith zap fs gs = freeT \_ → go (Tuple fs gs)
     ∷ Tuple (Coroutine f m a) (Coroutine g m a)
     → m (Either a (h (Coroutine h m a)))
   go (Tuple fs' gs') = do
-    next ← sequential
-      ( lift2 (zap Tuple)
-          <$> parallel (FT.resume fs')
-          <*> parallel (FT.resume gs')
-      )
-    case next of
-      Left a → pure (Left a)
-      Right o → pure (Right (map (\t → freeT \_ → go t) o))
+    next ← sequential do
+      lift2 (zap Tuple)
+        <$> parallel (FT.resume fs')
+        <*> parallel (FT.resume gs')
+    pure case next of
+      Left a → Left a
+      Right o → Right (map (\t → freeT \_ → go t) o)
 
 -- | Fuse two `Coroutine`routines with a bias to the left.
 fuseWithL
@@ -91,38 +96,94 @@ fuseWithL
   → Coroutine f m a
   → Coroutine g m a
   → Coroutine h m a
-fuseWithL zap fs gs = freeT \_ → go (Tuple fs gs)
+fuseWithL zap fs gs = freeT \_ → go (fs /\ gs)
   where
-  go
-    ∷ Tuple (Coroutine f m a) (Coroutine g m a)
-    → m (Either a (h (Coroutine h m a)))
+  go ∷ Coroutine f m a /\ Coroutine g m a → m (Either a (h (Coroutine h m a)))
   go (Tuple fs' gs') = runExceptT do
     l ← ExceptT $ FT.resume fs'
     r ← ExceptT $ FT.resume gs'
-    pure (map (\t → freeT \_ → go t) (zap Tuple l r))
+    pure $ zap Tuple l r <#> \t → freeT \_ → go t
+
+data Fused m n a b
+  = LeftEnded a (n b)
+  | RightEnded (m a) b
+  | BothEnded a b
+
+instance (Functor m, Functor n) ⇒ Bifunctor (Fused m n) where
+  bimap ∷ ∀ a b c d. (a → b) → (c → d) → Fused m n a c → Fused m n b d
+  bimap f g = case _ of
+    LeftEnded a nb → LeftEnded (f a) (map g nb)
+    RightEnded ma b → RightEnded (map f ma) (g b)
+    BothEnded a b → BothEnded (f a) (g b)
+
+bihoistFused
+  ∷ ∀ m n m' n' a b. (m ~> m') → (n ~> n') → Fused m n a b → Fused m' n' a b
+bihoistFused mf nf = case _ of
+  LeftEnded a nb → LeftEnded a (nf nb)
+  RightEnded ma b → RightEnded (mf ma) b
+  BothEnded a b → BothEnded a b
+
+fuseL
+  ∷ ∀ f g h m x y
+  . Functor f
+  ⇒ Functor g
+  ⇒ Functor h
+  ⇒ MonadRec m
+  ⇒ (∀ b c d. (b → c → d) → f b → g c → h d)
+  → Coroutine f m x
+  → Coroutine g m y
+  → Coroutine h m (Fused (Coroutine f m) (Coroutine g m) x y)
+fuseL zap fs gs = freeT \_ → go (fs /\ gs)
+  where
+  go
+    ∷ Coroutine f m x /\ Coroutine g m y
+    → m
+        ( Fused (Coroutine f m) (Coroutine g m) x y
+            \/ h (Coroutine h m (Fused (Coroutine f m) (Coroutine g m) x y))
+        )
+  go (Tuple fs' gs') = do
+    efs ← FT.resume fs'
+    egs ← FT.resume gs'
+    pure case efs, egs of
+      Left x, Left y → Left $ BothEnded x y
+      Left x, _ → Left $ LeftEnded x gs'
+      _, Left y → Left $ RightEnded fs' y
+      Right f, Right g → Right $ zap Tuple f g <#> \t → freeT \_ → go t
 
 --------------------------------------------------------------------------------
 -- Producer --------------------------------------------------------------------
 
-type Producer a m x = Coroutine (Produce a) m x
+newtype Producer a m x = Producer (Coroutine (Produce a) m x)
+
+derive instance Newtype (Producer a m x) _
+derive newtype instance Functor m ⇒ Functor (Producer a m)
+derive newtype instance Monad m ⇒ Apply (Producer a m)
+derive newtype instance Monad m ⇒ Applicative (Producer a m)
+derive newtype instance Monad m ⇒ Bind (Producer a m)
+derive newtype instance Monad m ⇒ MonadTrans (Producer a)
+derive newtype instance MonadEffect m ⇒ MonadEffect (Producer a m)
+instance Monad m ⇒ Monad (Producer a m)
+derive newtype instance Monad m ⇒ MonadRec (Producer a m)
+
+unProducer ∷ ∀ a m x. Producer a m x → Coroutine (Produce a) m x
+unProducer = unwrap
 
 emit ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ x → Producer x m Unit
-emit x = suspend (produce x pass)
+emit x = Producer (suspend (produce x pass))
 
 -- | Create a `Producer` by providing a monadic function that produces values.
 -- |
 -- | The function should return a value of type `r` at most once, when the
 -- | `Producer` is ready to close.
-producerEffect ∷ ∀ o m r. Monad m ⇒ m (Either o r) → Producer o m r
-producerEffect recv = loop do
-  e ← lift recv
-  case e of
-    Left o → emit o $> Nothing
+producerEffect ∷ ∀ a m r. Monad m ⇒ m (Either a r) → Producer a m r
+producerEffect recv = Producer $ loop do
+  lift recv >>= case _ of
+    Left o → unwrap (emit o $> Nothing)
     Right r → pure (Just r)
 
 producerIterate ∷ ∀ a m. MonadRec m ⇒ a → (a → m (Maybe a)) → Producer a m Unit
-producerIterate a f = a # tailRecM \i →
-  emit i *> map (maybe (Done unit) Loop) (lift (f i))
+producerIterate a f = Producer $ a # tailRecM \i →
+  unwrap (emit i) *> map (maybe (Done unit) Loop) (lift (f i))
 
 -- | Create a `Producer` by providing a pure function that generates next output
 -- |
@@ -134,9 +195,12 @@ producerUnfold
   ⇒ (s → Maybe (Tuple a s))
   → s
   → Producer a m Unit
-producerUnfold step state = freeT \_ → pure case step state of
-  Nothing → Left unit
-  Just (Tuple a nextState) → Right $ produce a $ producerUnfold step nextState
+producerUnfold step' = Producer <<< go step'
+  where
+  go step state = freeT \_ →
+    pure case step state of
+      Nothing → Left unit
+      Just (Tuple a nextState) → Right (produce a (go step nextState))
 
 -- | Create a `Producer` that takes its values from right-folding a foldable.
 producerFoldr ∷ ∀ f a m. Monad m ⇒ Foldable f ⇒ f a → Producer a m Unit
@@ -147,75 +211,120 @@ producerFoldl ∷ ∀ f a m. Monad m ⇒ Foldable f ⇒ f a → Producer a m Uni
 producerFoldl = foldl (flip (applySecond <<< emit)) (pure unit)
 
 runProducer ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → m (Produce (Array a) x)
-runProducer = identity # tailRecM2 \f g →
-  FT.resume g <#> case _ of
-    Right p → loop2 (f <<< Array.cons (produce1 p)) (produce2 p)
-    Left x → Done $ produce (f []) x
+runProducer = unProducer >>>
+  ( identity # tailRecM2 \f g →
+      FT.resume g <#> case _ of
+        Right p → loop2 (f <<< Array.cons (produce1 p)) (produce2 p)
+        Left x → Done $ produce (f []) x
+  )
 
 --------------------------------------------------------------------------------
 -- Consumer --------------------------------------------------------------------
 
-type Consumer a m x = Coroutine (Consume a) m x
+newtype Consumer a m x = Consumer (Coroutine (Consume a) m x)
+
+derive instance Newtype (Consumer a m x) _
+derive newtype instance Functor m ⇒ Functor (Consumer a m)
+derive newtype instance Monad m ⇒ Apply (Consumer a m)
+derive newtype instance Monad m ⇒ Applicative (Consumer a m)
+derive newtype instance Monad m ⇒ Bind (Consumer a m)
+derive newtype instance Monad m ⇒ MonadTrans (Consumer a)
+derive newtype instance MonadEffect m ⇒ MonadEffect (Consumer a m)
+instance Monad m ⇒ Monad (Consumer a m)
+derive newtype instance Monad m ⇒ MonadRec (Consumer a m)
+
+unConsumer ∷ ∀ a m x. Consumer a m x → Coroutine (Consume a) m x
+unConsumer = unwrap
 
 await ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ Consumer x m x
-await = suspend (Consume pure)
+await = Consumer (suspend (Consume pure))
 
 runConsumer ∷ ∀ a m x. MonadRec m ⇒ Array a → Consumer a m x → m x
 runConsumer = tailRecM2 \is it →
-  FT.resume it <#> case Array.uncons is of
+  FT.resume (unConsumer it) <#> case Array.uncons is of
     Nothing → case _ of
-      Right (Consume k) → loop2 [] (k (unsafeThrow "No more inputs"))
+      Right (Consume k) → loop2 [] (Consumer $ k (unsafeThrow "No more inputs"))
       Left x → Done x
     Just { head, tail } → case _ of
-      Right (Consume k) → loop2 tail (k head)
+      Right (Consume k) → loop2 tail (Consumer $ k head)
       Left x → Done x
 
 runProducerConsumer
-  ∷ ∀ m a x y. MonadRec m ⇒ Producer a m x → Consumer a m y → m (x /\ y)
-runProducerConsumer = tailRecM2 \producer consumer → do
-  l ← FT.resume producer
-  r ← FT.resume consumer
-  pure case l, r of
-    Right p, Right (Consume f) → loop2 (produce2 p) (f (produce1 p))
-    Right p, Left y → loop2 (produce2 p) (pure y)
-    Left _, Right _ → unsafeThrow "The producer ended too soon."
-    Left x, Left y → Done $ x /\ y
+  ∷ ∀ m a x y
+  . MonadRec m
+  ⇒ Producer a m x
+  → Consumer a m y
+  → m (Fused (Producer a m) (Consumer a m) x y)
+runProducerConsumer p c = bihoistFused wrap wrap <$>
+  runFreeT (pure <<< unwrap) (fuseL zap (unProducer p) (unConsumer c))
+  where
+  zap ∷ ∀ h b c d. (b → c → d) → Produce h b → Consume h c → Identity d
+  zap f produce hc = Identity (f b (consume hc h))
+    where
+    h = produce1 produce
+    b = produce2 produce
 
 runProducerConsumer'
   ∷ ∀ m a x y. MonadRec m ⇒ Producer a m x → Consumer (Maybe a) m y → m (x /\ y)
 runProducerConsumer' = tailRecM2 \producer consumer → do
-  l ← FT.resume producer
-  r ← FT.resume consumer
+  l ← FT.resume $ unProducer producer
+  r ← FT.resume $ unConsumer consumer
   pure case l, r of
-    Right p, Right (Consume f) → loop2 (produce2 p) (f (Just (produce1 p)))
-    Right p, Left y → loop2 (produce2 p) (pure y)
-    Left x, Right (Consume f) → loop2 (pure x) (f Nothing)
+    Right p, Right (Consume f) → loop2
+      (Producer $ produce2 p)
+      (Consumer $ f (Just (produce1 p)))
+    Right p, Left y → loop2 (Producer $ produce2 p) (pure y)
+    Left x, Right (Consume f) → loop2 (pure x) (Consumer $ f Nothing)
     Left x, Left y → Done (x /\ y)
 
 --------------------------------------------------------------------------------
 -- Transducer ------------------------------------------------------------------
 
-type Transducer a b m x = Coroutine (Transduce (Maybe a) b) m x
+-- | A suspension functor that makes a coroutine which can either input
+-- | or output a value every time it suspends, but not both at the same time.
+-- type Transduce input output = Coproduct (Function input) (Tuple output)
+data Transduce input output x
+  = Demand (input → x)
+  | Supply output x
+
+derive instance Functor (Transduce a b)
+
+newtype Transducer a b m x = Transducer (Coroutine (Transduce a b) m x)
+
+derive instance Newtype (Transducer a b m r) _
+derive newtype instance Functor m ⇒ Functor (Transducer a b m)
+derive newtype instance Monad m ⇒ Apply (Transducer a b m)
+derive newtype instance Monad m ⇒ Applicative (Transducer a b m)
+derive newtype instance Monad m ⇒ Bind (Transducer a b m)
+derive newtype instance Monad m ⇒ MonadTrans (Transducer a b)
+derive newtype instance MonadEffect m ⇒ MonadEffect (Transducer a b m)
+instance Monad m ⇒ Monad (Transducer a b m)
+derive newtype instance Monad m ⇒ MonadRec (Transducer a b m)
+
+unTransducer ∷ ∀ a b m r. Transducer a b m r → Coroutine (Transduce a b) m r
+unTransducer = unwrap
+
+resumeT
+  ∷ ∀ a b m r
+  . MonadRec m
+  ⇒ Transducer a b m r
+  → m (Either r (Transduce a b (FreeT (Transduce a b) m r)))
+resumeT = unTransducer >>> FT.resume
 
 yieldT ∷ ∀ m a b. Monad m ⇒ b → Transducer a b m Unit
-yieldT b = suspend (Supply (produce b pass))
+yieldT b = Transducer $ suspend $ Supply b pass
 
-awaitT ∷ ∀ m a b. Monad m ⇒ Transducer a b m (Maybe a)
-awaitT = suspend (Demand (Consume pure))
-
-awaitJustT ∷ ∀ i m o. Monad m ⇒ Transducer i o m i
-awaitJustT = unit # tailRecM \_ →
-  suspend (Demand (Consume pure)) <#> maybe (Loop unit) Done
+awaitT ∷ ∀ m a b. Monad m ⇒ Transducer a b m a
+awaitT = Transducer $ suspend $ Demand pure
 
 liftT ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
-liftT f = awaitT >>= maybe pass \a → yieldT (f a) *> liftT f
+liftT f = awaitT >>= \a → yieldT (f a) *> liftT f
 
 transduceAll ∷ ∀ m a b. Monad m ⇒ (a → Array b) → Transducer a b m Unit
-transduceAll f =
-  awaitT >>= maybe pass \a → traverse yieldT (f a) *> transduceAll f
+transduceAll f = awaitT >>= \a → traverse yieldT (f a) *> transduceAll f
 
 transduce ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
-transduce f = awaitT >>= maybe pass \a → yieldT (f a) *> transduce f
+transduce f = awaitT >>= \a → yieldT (f a) *> transduce f
 
 transduceWithState
   ∷ ∀ m a b s
@@ -224,62 +333,68 @@ transduceWithState
   → (s → Array b)
   → s
   → Transducer a b m Unit
-transduceWithState step eof state = awaitT >>= case _ of
-  Nothing → for_ (eof state) yieldT
-  Just a → do
-    let nextState /\ bs = step state a
-    for_ bs yieldT *> transduceWithState step eof nextState
+transduceWithState step eof state = do
+  a ← awaitT
+  let nextState /\ bs = step state a
+  for_ bs yieldT *> transduceWithState step eof nextState
+
+data Transduced f h x y
+  = TransducedBoth x y
+  | TransducedFirst x (h y)
+  | TransducedLast (f x) y
+
+instance (Functor m, Functor n) ⇒ Bifunctor (Transduced m n) where
+  bimap f g = case _ of
+    TransducedFirst a nb → TransducedFirst (f a) (map g nb)
+    TransducedLast ma b → TransducedLast (map f ma) (g b)
+    TransducedBoth a b → TransducedBoth (f a) (g b)
 
 composeTransducers
   ∷ ∀ a b c m x y
   . MonadRec m
   ⇒ Transducer a b m x
   → Transducer b c m y
-  → Transducer a c m (x /\ y)
-composeTransducers t1 t2 = freeT \_ → do
-  e1 ← FT.resume t1
-  e2 ← FT.resume t2
+  → Transducer a c m (Transduced (Transducer a b m) (Transducer b c m) x y)
+composeTransducers t1 t2 = Transducer $ freeT \_ → do
+  e1 ← resumeT t1
+  e2 ← resumeT t2
+  let composeUnder a b = unwrap (wrap a >-> wrap b)
   case e1, e2 of
-    Left x, Left y →
-      pure $ Left $ x /\ y
-    Right (Demand (Consume f)), e →
-      pure $ Right $ Demand $ Consume \a → f a >-> freeT \_ → pure e
-    e, Right (Supply t) →
-      pure $ Right $ Supply $ composeTransducers (freeT \_ → pure e) <$> t
-    Right (Supply p), Right (Demand (Consume f)) →
-      FT.resume $ produce2 p >-> f (Just (produce1 p))
-    Right (Supply p), Left y →
-      FT.resume $ produce2 p >-> pure y
-    Left x, Right (Demand (Consume f)) →
-      FT.resume $ pure x >-> f Nothing
+    Left x, Left y → pure $ Left $ TransducedBoth x y
+    Left x, Right _ → pure $ Left $ TransducedFirst x t2
+    Right _, Left y → pure $ Left $ TransducedLast t1 y
+    Right (Demand f), l →
+      pure $ Right $ Demand \a → f a `composeUnder` freeT \_ → pure l
+    e, Right (Supply a t) →
+      pure $ Right $ Supply a $ (freeT \_ → pure e) `composeUnder` t
+    Right (Supply a t), Right (Demand f) → resumeT $ wrap t >-> wrap (f a)
 
 infixr 9 composeTransducers as >->
 
 producerT ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → Transducer Void a m x
-producerT = FT.interpret Supply
+producerT = over Producer do
+  FT.interpret (Supply <$> produce1 <*> produce2)
 
-consumerT ∷ ∀ a m x. MonadRec m ⇒ Consumer (Maybe a) m x → Transducer a Void m x
-consumerT = FT.interpret Demand
+consumerT ∷ ∀ a m x. MonadRec m ⇒ Consumer a m x → Transducer a Void m x
+consumerT = over Consumer do
+  FT.interpret (consume >>> Demand)
 
 transducerP ∷ ∀ a m x. MonadRec m ⇒ Transducer Void a m x → Producer a m x
-transducerP = FT.interpret case _ of
-  Demand _impossible → unsafeThrow "Transducer.transducerP: Demand"
-  Supply t → t
+transducerP = over Transducer do
+  FT.interpret case _ of
+    Demand _ → unsafeThrow "Transducer.transducerP: Demand"
+    Supply a b → produce a b
 
-transducerC
-  ∷ ∀ a m x. MonadRec m ⇒ Transducer a Void m x → Consumer (Maybe a) m x
-transducerC = FT.interpret case _ of
-  Demand f → f
-  Supply _impossible → unsafeThrow "Transducer.transducerC: Supply"
+transducerC ∷ ∀ a m x. MonadRec m ⇒ Transducer a Void m x → Consumer a m x
+transducerC = over Transducer do
+  FT.interpret case _ of
+    Demand f → Consume f
+    Supply _ _ → unsafeThrow "Transducer.transducerC: Supply"
 
-transducerT
-  ∷ ∀ m x
-  . MonadRec m
-  ⇒ Transducer Void Void m x
-  → Process m x
-transducerT = FT.interpret case _ of
+transducerT ∷ ∀ m x. MonadRec m ⇒ Transducer Void Void m x → Process m x
+transducerT = unTransducer >>> FT.interpret case _ of
   Demand _impossible → unsafeThrow "Transducer.toTrampoline: Demand"
-  Supply p → Identity (produce2 p)
+  Supply _ t → Identity t
 
 --------------------------------------------------------------------------------
 -- Branching -------------------------------------------------------------------

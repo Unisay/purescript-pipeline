@@ -7,6 +7,7 @@
   , "control"
   , "custom-prelude"
   , "effect"
+  , "either"
   , "exceptions"
   , "foldable-traversable"
   , "freet"
