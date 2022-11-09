@@ -3,7 +3,7 @@ module Test.Main where
 import Custom.Prelude
 
 import Control.Alternative (guard)
-import Control.Coroutine (Consumer, Fused(..), Producer, Transducer, await, awaitT, consumeWithState, emit, producerIterate, runProducerConsumer, transduceAll)
+import Control.Coroutine (Consumer, Fused(..), Producer, Transduced(..), Transducer, await, awaitT, consumeWithState, consumerT, emit, producerIterate, runProducerConsumer, scanT, transduceAll, transducerC, (>->))
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Rec.Class (class MonadRec, forever)
 import Data.Array as Array
@@ -40,6 +40,20 @@ main = launchAff_ $ runSpec [ consoleReporter ] do
         LeftEnded _ _ → pass -- producer is expected to end first
         RightEnded _ _ → fail "Consumer ended"
         BothEnded _ _ → fail "Both ended"
+  describe "Transducer" do
+    it "scans" do
+      let
+        t ∷ ∀ r. Transducer Int String Aff r
+        t = scanT (\s a → s <> show a) "" identity
+        c = transducerC (t >-> consumerT (take 5))
+      runProducerConsumer (forever (emit 3)) c >>= case _ of
+        LeftEnded _ _ → fail "Producer ended"
+        BothEnded _ _ → fail "Both ended"
+        RightEnded _ res → case res of
+          TransducedBoth _ _ → fail "Both transduced"
+          TransducedFirst _unit _ → fail "Transduced first"
+          TransducedLast _ outputs →
+            outputs `shouldEqual` [ "", "3", "33", "333", "3333" ]
   describe "Consumer" do
     it "consumes input with state" do
       runProducerConsumer (forever (emit 3)) (take 4) >>= case _ of

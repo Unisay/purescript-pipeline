@@ -394,12 +394,10 @@ composeTransducers t1 t2 = Transducer $ freeT \_ → do
 infixr 9 composeTransducers as >->
 
 producerT ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → Transducer Void a m x
-producerT = over Producer do
-  FT.interpret (Supply <$> produce1 <*> produce2)
+producerT = over Producer do FT.interpret (Supply <$> produce1 <*> produce2)
 
 consumerT ∷ ∀ a m x. MonadRec m ⇒ Consumer a m x → Transducer a Void m x
-consumerT = over Consumer do
-  FT.interpret (consume >>> Demand)
+consumerT = over Consumer do FT.interpret (consume >>> Demand)
 
 transducerP ∷ ∀ a m x. MonadRec m ⇒ Transducer Void a m x → Producer a m x
 transducerP = over Transducer do
