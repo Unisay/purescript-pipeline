@@ -3,21 +3,10 @@ module Test.Main where
 import Custom.Prelude
 
 import Control.Alternative (guard)
-import Control.Coroutine
-  ( Consumer
-  , Fused(..)
-  , Producer
-  , Transducer
-  , await
-  , awaitT
-  , emit
-  , producerIterate
-  , runProducerConsumer
-  , transduceAll
-  , yieldT
-  )
+import Control.Coroutine (Consumer, Fused(..), Producer, Transducer, await, awaitT, consumeWithState, emit, producerIterate, runProducerConsumer, transduceAll)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
-import Control.Monad.Rec.Class (forever)
+import Control.Monad.Rec.Class (class MonadRec, forever)
+import Data.Array as Array
 import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
 import Effect.Class (class MonadEffect)
@@ -36,24 +25,40 @@ main = launchAff_ $ runSpec [ consoleReporter ] do
         RightEnded _ _ → fail "Consumer ended"
         BothEnded _ result → result `shouldEqual` 53
     it "handles premature producer" do
-      let badProducer = pass
-      runProducerConsumer badProducer consumer >>= case _ of
+      runProducerConsumer (produceFromTo 1 10) consumeForever >>= case _ of
         LeftEnded _ _ → pass
         RightEnded _ _ → fail "Consumer ended"
         BothEnded _ _ → fail "Both ended"
     it "handles premature consumer" do
-      runProducerConsumer producer consumer >>= case _ of
-        LeftEnded _ _ → fail "Producer ended"
-        RightEnded _ _ → pass
-        BothEnded _ _ → fail "Both ended"
+      runProducerConsumer (forever (emit 1)) (take 5 ∷ Consumer Int _ _) >>=
+        case _ of
+          LeftEnded _ _ → fail "Producer ended"
+          RightEnded _ _ → pass
+          BothEnded _ _ → fail "Both ended"
     it "is stack safe" do
-      let
-        p = producerIterate 42 \i → pure $ guard (i < 100000) $> (i + 1)
-        c = forever await
-      runProducerConsumer p c >>= case _ of
+      runProducerConsumer (produceFromTo 1 100000) consumeForever >>= case _ of
         LeftEnded _ _ → pass -- producer is expected to end first
         RightEnded _ _ → fail "Consumer ended"
         BothEnded _ _ → fail "Both ended"
+  describe "Consumer" do
+    it "consumes input with state" do
+      runProducerConsumer (forever (emit 3)) (take 4) >>= case _ of
+        LeftEnded _ _ → fail "Producer ended"
+        BothEnded _ _ → fail "Both ended"
+        RightEnded _ res → res `shouldEqual` [ 3, 3, 3, 3 ]
+
+--------------------------------------------------------------------------------
+-- Fixture ---------------------------------------------------------------------
+
+consumeForever ∷ ∀ a r. Consumer a Aff r
+consumeForever = forever (await ∷ Consumer a Aff a)
+
+take ∷ ∀ a. Int → Consumer a Aff (Array a)
+take n = consumeWithState Array.snoc [] \acc →
+  if Array.length acc == n then Just acc else Nothing
+
+produceFromTo ∷ ∀ m. MonadRec m ⇒ Int → Int → Producer Int m Unit
+produceFromTo a b = producerIterate a \i → pure $ guard (i < b) $> (i + 1)
 
 --------------------------------------------------------------------------------
 -- Producer/Consumer test ------------------------------------------------------
@@ -92,9 +97,9 @@ double = transduceAll \a → [ a, a ]
 doubleTrouble ∷ ∀ a m. Show a ⇒ MonadEffect m ⇒ Transducer a a m Unit
 doubleTrouble = awaitT >>= \a → do
   log $ "Yielding first copy (" <> show a <> ") ..."
-  yieldT a
+  emit a
   log $ "Yielding second copy (" <> show a <> ") ..."
-  yieldT a
+  emit a
 
 iter2 ∷ Int → Consumer (Maybe Int) Aff Unit
 iter2 s = do

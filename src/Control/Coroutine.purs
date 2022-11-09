@@ -168,8 +168,8 @@ derive newtype instance Monad m ⇒ MonadRec (Producer a m)
 unProducer ∷ ∀ a m x. Producer a m x → Coroutine (Produce a) m x
 unProducer = unwrap
 
-emit ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ x → Producer x m Unit
-emit x = Producer (suspend (produce x pass))
+emitP ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ x → Producer x m Unit
+emitP x = Producer (suspend (produce x pass))
 
 -- | Create a `Producer` by providing a monadic function that produces values.
 -- |
@@ -178,12 +178,12 @@ emit x = Producer (suspend (produce x pass))
 producerEffect ∷ ∀ a m r. Monad m ⇒ m (Either a r) → Producer a m r
 producerEffect recv = Producer $ loop do
   lift recv >>= case _ of
-    Left o → unwrap (emit o $> Nothing)
+    Left o → unwrap (emitP o $> Nothing)
     Right r → pure (Just r)
 
 producerIterate ∷ ∀ a m. MonadRec m ⇒ a → (a → m (Maybe a)) → Producer a m Unit
 producerIterate a f = Producer $ a # tailRecM \i →
-  unwrap (emit i) *> map (maybe (Done unit) Loop) (lift (f i))
+  unwrap (emitP i) *> map (maybe (Done unit) Loop) (lift (f i))
 
 -- | Create a `Producer` by providing a pure function that generates next output
 -- |
@@ -236,8 +236,25 @@ derive newtype instance Monad m ⇒ MonadRec (Consumer a m)
 unConsumer ∷ ∀ a m x. Consumer a m x → Coroutine (Consume a) m x
 unConsumer = unwrap
 
-await ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ Consumer x m x
-await = Consumer (suspend (Consume pure))
+awaitC ∷ ∀ m x. Monad m ⇒ Consumer x m x
+awaitC = Consumer (suspend (Consume pure))
+
+consumeWithState
+  ∷ ∀ a m s x
+  . Monad m
+  ⇒ (s → a → s)
+  -- ^ step function that produces next state
+  → s
+  -- ^ initial state
+  → (s → Maybe x)
+  -- ^ Nothing: continue consuming input, Just x: terminate consumer with x
+  → Consumer a m x
+consumeWithState step init last = go init
+  where
+  go s = do
+    a ← awaitC
+    let s' = step s a
+    maybe (go s') pure (last s')
 
 runConsumer ∷ ∀ a m x. MonadRec m ⇒ Array a → Consumer a m x → m x
 runConsumer = tailRecM2 \is it →
@@ -311,20 +328,25 @@ resumeT
   → m (Either r (Transduce a b (FreeT (Transduce a b) m r)))
 resumeT = unTransducer >>> FT.resume
 
-yieldT ∷ ∀ m a b. Monad m ⇒ b → Transducer a b m Unit
-yieldT b = Transducer $ suspend $ Supply b pass
+emitT ∷ ∀ m a b. Monad m ⇒ b → Transducer a b m Unit
+emitT b = Transducer $ suspend $ Supply b pass
 
 awaitT ∷ ∀ m a b. Monad m ⇒ Transducer a b m a
 awaitT = Transducer $ suspend $ Demand pure
 
 liftT ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
-liftT f = awaitT >>= \a → yieldT (f a) *> liftT f
+liftT f = awaitT >>= \a → emitT (f a) *> liftT f
 
 transduceAll ∷ ∀ m a b. Monad m ⇒ (a → Array b) → Transducer a b m Unit
-transduceAll f = awaitT >>= \a → traverse yieldT (f a) *> transduceAll f
+transduceAll f = awaitT >>= \a → traverse emitT (f a) *> transduceAll f
 
-transduce ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
-transduce f = awaitT >>= \a → yieldT (f a) *> transduce f
+scanT ∷ ∀ m i x o r. Monad m ⇒ (x → i → x) → x → (x → o) → Transducer i o m r
+scanT step init done = go init
+  where
+  go x = do
+    emitT (done x)
+    i ← awaitT
+    go (step x i)
 
 transduceWithState
   ∷ ∀ m a b s
@@ -336,7 +358,7 @@ transduceWithState
 transduceWithState step eof state = do
   a ← awaitT
   let nextState /\ bs = step state a
-  for_ bs yieldT *> transduceWithState step eof nextState
+  for_ bs emitT *> transduceWithState step eof nextState
 
 data Transduced f h x y
   = TransducedBoth x y
@@ -395,6 +417,28 @@ transducerT ∷ ∀ m x. MonadRec m ⇒ Transducer Void Void m x → Process m x
 transducerT = unTransducer >>> FT.interpret case _ of
   Demand _impossible → unsafeThrow "Transducer.toTrampoline: Demand"
   Supply _ t → Identity t
+
+--------------------------------------------------------------------------------
+-- Common behaviors ------------------------------------------------------------
+
+class Emitter c a where
+  emit ∷ a → c Unit
+
+instance Monad m ⇒ Emitter (Producer a m) a where
+  emit = emitP
+
+instance Monad m ⇒ Emitter (Transducer a b m) b where
+  emit = emitT
+
+class Receiver ∷ (Type → Type) → Type → Constraint
+class Receiver c a where
+  await ∷ c a
+
+instance Monad m ⇒ Receiver (Consumer a m) a where
+  await = awaitC
+
+instance Monad m ⇒ Receiver (Transducer a b m) a where
+  await = awaitT
 
 --------------------------------------------------------------------------------
 -- Branching -------------------------------------------------------------------
