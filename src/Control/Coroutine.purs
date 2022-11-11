@@ -3,15 +3,30 @@ module Control.Coroutine where
 import Custom.Prelude
 
 import Control.Apply (applySecond, lift2)
-import Control.Coroutine.Functor (Consume(..), Join, Produce, Split, consume, produce, produce1, produce2)
+import Control.Coroutine.Duct (Duct(..), bihoistDuct)
+import Control.Coroutine.Functor
+  ( Consume(..)
+  , Join
+  , Produce
+  , Split
+  , consume
+  , produce
+  , produce1
+  , produce2
+  )
 import Control.Monad.Except (class MonadTrans, ExceptT(..), runExceptT)
 import Control.Monad.Free.Trans (FreeT, freeT, runFreeT)
 import Control.Monad.Free.Trans as FT
-import Control.Monad.Rec.Class (class MonadRec, Step(..), loop2, tailRecM, tailRecM2)
+import Control.Monad.Rec.Class
+  ( class MonadRec
+  , Step(..)
+  , loop2
+  , tailRecM
+  , tailRecM2
+  )
 import Control.Monad.Trans.Class (lift)
 import Control.Parallel.Class (class Parallel, parallel, sequential)
 import Data.Array as Array
-import Data.Bifunctor (class Bifunctor)
 import Data.Either.Nested (type (\/))
 import Data.Foldable (class Foldable, foldl, foldr)
 import Data.Functor.Coproduct (left, right)
@@ -104,50 +119,31 @@ fuseWithL zap fs gs = freeT \_ → go (fs /\ gs)
     r ← ExceptT $ FT.resume gs'
     pure $ zap Tuple l r <#> \t → freeT \_ → go t
 
-data Fused m n a b
-  = LeftEnded a (n b)
-  | RightEnded (m a) b
-  | BothEnded a b
-
-instance (Functor m, Functor n) ⇒ Bifunctor (Fused m n) where
-  bimap ∷ ∀ a b c d. (a → b) → (c → d) → Fused m n a c → Fused m n b d
-  bimap f g = case _ of
-    LeftEnded a nb → LeftEnded (f a) (map g nb)
-    RightEnded ma b → RightEnded (map f ma) (g b)
-    BothEnded a b → BothEnded (f a) (g b)
-
-bihoistFused
-  ∷ ∀ m n m' n' a b. (m ~> m') → (n ~> n') → Fused m n a b → Fused m' n' a b
-bihoistFused mf nf = case _ of
-  LeftEnded a nb → LeftEnded a (nf nb)
-  RightEnded ma b → RightEnded (mf ma) b
-  BothEnded a b → BothEnded a b
-
-fuseL
+zip
   ∷ ∀ f g h m x y
   . Functor f
   ⇒ Functor g
   ⇒ Functor h
   ⇒ MonadRec m
-  ⇒ (∀ b c d. (b → c → d) → f b → g c → h d)
+  ⇒ (∀ b c d. (b → c → d) → (f b → g c → h d))
   → Coroutine f m x
   → Coroutine g m y
-  → Coroutine h m (Fused (Coroutine f m) (Coroutine g m) x y)
-fuseL zap fs gs = freeT \_ → go (fs /\ gs)
+  → Coroutine h m (Duct (Coroutine f m) (Coroutine g m) x y)
+zip zap fs gs = freeT \_ → go (fs /\ gs)
   where
   go
     ∷ Coroutine f m x /\ Coroutine g m y
     → m
-        ( Fused (Coroutine f m) (Coroutine g m) x y
-            \/ h (Coroutine h m (Fused (Coroutine f m) (Coroutine g m) x y))
+        ( Duct (Coroutine f m) (Coroutine g m) x y
+            \/ h (Coroutine h m (Duct (Coroutine f m) (Coroutine g m) x y))
         )
   go (Tuple fs' gs') = do
     efs ← FT.resume fs'
     egs ← FT.resume gs'
     pure case efs, egs of
       Left x, Left y → Left $ BothEnded x y
-      Left x, _ → Left $ LeftEnded x gs'
-      _, Left y → Left $ RightEnded fs' y
+      Left x, Right g → Left $ LeftEnded x (suspend g)
+      Right f, Left y → Left $ RightEnded (suspend f) y
       Right f, Right g → Right $ zap Tuple f g <#> \t → freeT \_ → go t
 
 --------------------------------------------------------------------------------
@@ -271,12 +267,12 @@ runProducerConsumer
   . MonadRec m
   ⇒ Producer a m x
   → Consumer a m y
-  → m (Fused (Producer a m) (Consumer a m) x y)
-runProducerConsumer p c = bihoistFused wrap wrap <$>
-  runFreeT (pure <<< unwrap) (fuseL zap (unProducer p) (unConsumer c))
+  → m (Duct (Producer a m) (Consumer a m) x y)
+runProducerConsumer p c = bihoistDuct wrap wrap <$>
+  runFreeT (pure <<< unwrap) (zip zap (unProducer p) (unConsumer c))
   where
   zap ∷ ∀ h b c d. (b → c → d) → Produce h b → Consume h c → Identity d
-  zap f produce hc = Identity (f b (consume hc h))
+  zap bc produce hc = Identity (bc b (consume hc h))
     where
     h = produce1 produce
     b = produce2 produce
@@ -360,31 +356,20 @@ transduceWithState step eof state = do
   let nextState /\ bs = step state a
   for_ bs emitT *> transduceWithState step eof nextState
 
-data Transduced f h x y
-  = TransducedBoth x y
-  | TransducedFirst x (h y)
-  | TransducedLast (f x) y
-
-instance (Functor m, Functor n) ⇒ Bifunctor (Transduced m n) where
-  bimap f g = case _ of
-    TransducedFirst a nb → TransducedFirst (f a) (map g nb)
-    TransducedLast ma b → TransducedLast (map f ma) (g b)
-    TransducedBoth a b → TransducedBoth (f a) (g b)
-
 composeTransducers
   ∷ ∀ a b c m x y
   . MonadRec m
   ⇒ Transducer a b m x
   → Transducer b c m y
-  → Transducer a c m (Transduced (Transducer a b m) (Transducer b c m) x y)
+  → Transducer a c m (Duct (Transducer a b m) (Transducer b c m) x y)
 composeTransducers t1 t2 = Transducer $ freeT \_ → do
   e1 ← resumeT t1
   e2 ← resumeT t2
   let composeUnder a b = unwrap (wrap a >-> wrap b)
   case e1, e2 of
-    Left x, Left y → pure $ Left $ TransducedBoth x y
-    Left x, Right _ → pure $ Left $ TransducedFirst x t2
-    Right _, Left y → pure $ Left $ TransducedLast t1 y
+    Left x, Left y → pure $ Left $ BothEnded x y
+    Left x, Right _ → pure $ Left $ LeftEnded x t2
+    Right _, Left y → pure $ Left $ RightEnded t1 y
     Right (Demand f), l →
       pure $ Right $ Demand \a → f a `composeUnder` freeT \_ → pure l
     e, Right (Supply a t) →

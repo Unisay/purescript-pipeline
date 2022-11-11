@@ -3,7 +3,8 @@ module Test.Main where
 import Custom.Prelude
 
 import Control.Alternative (guard)
-import Control.Coroutine (Consumer, Fused(..), Producer, Transduced(..), Transducer, await, awaitT, consumeWithState, consumerT, emit, producerIterate, runProducerConsumer, scanT, transduceAll, transducerC, (>->))
+import Control.Coroutine (Consumer, Producer, Transducer, await, awaitT, consumeWithState, consumerT, emit, producerIterate, runProducerConsumer, scanT, transduceAll, transducerC, (>->))
+import Control.Coroutine.Duct (Duct(..))
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Rec.Class (class MonadRec, forever)
 import Data.Array as Array
@@ -50,9 +51,9 @@ main = launchAff_ $ runSpec [ consoleReporter ] do
         LeftEnded _ _ → fail "Producer ended"
         BothEnded _ _ → fail "Both ended"
         RightEnded _ res → case res of
-          TransducedBoth _ _ → fail "Both transduced"
-          TransducedFirst _unit _ → fail "Transduced first"
-          TransducedLast _ outputs →
+          BothEnded _ _ → fail "Both transduced"
+          LeftEnded _unit _ → fail "Transduced first"
+          RightEnded _ outputs →
             outputs `shouldEqual` [ "", "3", "33", "333", "3333" ]
   describe "Consumer" do
     it "consumes input with state" do
@@ -153,4 +154,3 @@ Sum is: 12
 (Tuple unit (Tuple unit (Tuple unit unit)))
 
 -}
-
