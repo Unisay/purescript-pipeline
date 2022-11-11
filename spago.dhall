@@ -19,6 +19,7 @@
   , "prelude"
   , "spec"
   , "tailrec"
+  , "these"
   , "transformers"
   , "tuples"
   ]

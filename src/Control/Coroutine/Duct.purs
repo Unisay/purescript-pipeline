@@ -3,6 +3,7 @@ module Control.Coroutine.Duct where
 import Custom.Prelude
 
 import Data.Bifunctor (class Bifunctor)
+import Data.These (These(..))
 
 -- | Duct captures the possibly assymetric ending of coroutines:
 data Duct m n a b
@@ -25,3 +26,9 @@ bihoistDuct mf nf = case _ of
   LeftEnded a nb → LeftEnded a (nf nb)
   RightEnded ma b → RightEnded (mf ma) b
   BothEnded a b → BothEnded a b
+
+toThese ∷ ∀ m n a b. Duct m n a b → These a b
+toThese = case _ of
+  LeftEnded a _nb → This a
+  RightEnded _ma b → That b
+  BothEnded a b → Both a b
