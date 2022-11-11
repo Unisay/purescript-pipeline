@@ -24,7 +24,7 @@
             buildInputs = [
               pkgs.dhall
               pkgs.nixfmt
-              # pkgs.nodejs-16_x
+              epkgs.purs-backend-es
               pkgs.purescript
               epkgs.purs-tidy
               epkgs.spago

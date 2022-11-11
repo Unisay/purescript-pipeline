@@ -6,6 +6,7 @@ node_modules
 # Generated files
 .psci
 output
+output-es
 .direnv
 .spago
 .psc-ide-port
