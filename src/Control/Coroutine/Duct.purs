@@ -13,6 +13,13 @@ data Duct m n a b
   -- ^ Remaining left coroutine is `m a`, right couroutine ended with `b`, 
   | BothEnded a b -- Both coroutines ended with `a` and `b` respectively.
 
+duct
+  ∷ ∀ m n a b r. (a → n b → r) → (m a → b → r) → (a → b → r) → Duct m n a b → r
+duct left right both = case _ of
+  LeftEnded a nb → left a nb
+  RightEnded ma b → right ma b
+  BothEnded a b → both a b
+
 instance (Functor m, Functor n) ⇒ Bifunctor (Duct m n) where
   bimap ∷ ∀ a b c d. (a → b) → (c → d) → Duct m n a c → Duct m n b d
   bimap f g = case _ of
@@ -28,7 +35,4 @@ bihoistDuct mf nf = case _ of
   BothEnded a b → BothEnded a b
 
 toThese ∷ ∀ m n a b. Duct m n a b → These a b
-toThese = case _ of
-  LeftEnded a _nb → This a
-  RightEnded _ma b → That b
-  BothEnded a b → Both a b
+toThese = duct (const <<< This) (const That) Both

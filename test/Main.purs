@@ -1,9 +1,9 @@
 module Test.Main where
 
+import Control.Coroutine
 import Custom.Prelude
 
 import Control.Alternative (guard)
-import Control.Coroutine (Consumer, Producer, Transducer, await, awaitT, consumeWithState, consumerT, emit, producerIterate, runProducerConsumer, scanT, transduceAll, transducerC, (>->))
 import Control.Coroutine.Duct (Duct(..))
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Rec.Class (class MonadRec, forever)
@@ -66,7 +66,7 @@ main = launchAff_ $ runSpec [ consoleReporter ] do
 -- Fixture ---------------------------------------------------------------------
 
 consumeForever ∷ ∀ a r. Consumer a Aff r
-consumeForever = forever (await ∷ Consumer a Aff a)
+consumeForever = forever (receive ∷ Consumer a Aff a)
 
 take ∷ ∀ a. Int → Consumer a Aff (Array a)
 take n = consumeWithState Array.snoc [] \acc →
@@ -89,17 +89,17 @@ producer = do
 
 consumer ∷ Consumer Int Aff Int
 consumer = do
-  a ← log "Consumer: waiting for the first number..." *> await
+  a ← log "Consumer: waiting for the first number..." *> receive
   log $ "Consumer: received first number: " <> show a
-  b ← log "Consumer: waiting for the second number..." *> await
+  b ← log "Consumer: waiting for the second number..." *> receive
   log $ "Consumer: received second number: " <> show b
   pure $ a + b
 
 consumer2 ∷ Consumer (Maybe Int) Aff (Maybe Int)
 consumer2 = runMaybeT do
-  a ← log "Consumer: waiting for the first number..." *> MaybeT await
+  a ← log "Consumer: waiting for the first number..." *> MaybeT receive
   log $ "Consumer: received first number: " <> show a
-  b ← log "Consumer: waiting for the second number..." *> MaybeT await
+  b ← log "Consumer: waiting for the second number..." *> MaybeT receive
   log $ "Consumer: received second number: " <> show b
   pure $ a + b
 
@@ -110,7 +110,7 @@ double ∷ ∀ a m. Monad m ⇒ Transducer a a m Unit
 double = transduceAll \a → [ a, a ]
 
 doubleTrouble ∷ ∀ a m. Show a ⇒ MonadEffect m ⇒ Transducer a a m Unit
-doubleTrouble = awaitT >>= \a → do
+doubleTrouble = receiveT >>= \a → do
   log $ "Yielding first copy (" <> show a <> ") ..."
   emit a
   log $ "Yielding second copy (" <> show a <> ") ..."
@@ -118,7 +118,7 @@ doubleTrouble = awaitT >>= \a → do
 
 iter2 ∷ Int → Consumer (Maybe Int) Aff Unit
 iter2 s = do
-  n ← await <* log "Enter a number:"
+  n ← receive <* log "Enter a number:"
   case n of
     Nothing → log $ "Sum is: " <> show s
     Just r → iter2 (s + r)
