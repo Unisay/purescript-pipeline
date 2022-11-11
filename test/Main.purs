@@ -1,9 +1,24 @@
 module Test.Main where
 
-import Control.Coroutine
 import Custom.Prelude
 
 import Control.Alternative (guard)
+import Control.Coroutine
+  ( Consumer
+  , Producer
+  , Transducer
+  , consumeWithState
+  , consumerT
+  , emit
+  , producerIterate
+  , receive
+  , receiveT
+  , runProducerConsumer
+  , scanT
+  , transduceAll
+  , transducerC
+  , (>->)
+  )
 import Control.Coroutine.Duct (Duct(..))
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Rec.Class (class MonadRec, forever)
