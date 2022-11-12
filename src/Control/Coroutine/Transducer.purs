@@ -13,7 +13,7 @@ import Control.Monad.Free.Trans (FreeT, freeT)
 import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec)
 import Data.Identity (Identity(..))
-import Data.Newtype (class Newtype, over, unwrap, wrap)
+import Data.Newtype (class Newtype, over, un, unwrap, wrap)
 import Data.Pair (pair, pair1, pair2)
 import Data.Traversable (for_, traverse)
 import Data.Tuple.Nested (type (/\), (/\))
@@ -31,6 +31,8 @@ data Transduce input output x
 
 derive instance Functor (Transduce a b)
 
+--------------------------------------------------------------------------------
+
 newtype Transducer a b m x = Transducer (Coroutine (Transduce a b) m x)
 
 derive instance Newtype (Transducer a b m r) _
@@ -43,15 +45,12 @@ derive newtype instance MonadEffect m ⇒ MonadEffect (Transducer a b m)
 instance Monad m ⇒ Monad (Transducer a b m)
 derive newtype instance Monad m ⇒ MonadRec (Transducer a b m)
 
-unTransducer ∷ ∀ a b m r. Transducer a b m r → Coroutine (Transduce a b) m r
-unTransducer = unwrap
-
 resumeT
   ∷ ∀ a b m r
   . MonadRec m
   ⇒ Transducer a b m r
   → m (Either r (Transduce a b (FreeT (Transduce a b) m r)))
-resumeT = unTransducer >>> FT.resume
+resumeT = un Transducer >>> FT.resume
 
 emitT ∷ ∀ m a b. Monad m ⇒ b → Transducer a b m Unit
 emitT b = Transducer $ suspend $ Supply b pass
@@ -107,25 +106,25 @@ composeTransducers t1 t2 = Transducer $ freeT \_ → do
 
 infixr 9 composeTransducers as >->
 
-producerT ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → Transducer Void a m x
-producerT = over Producer do FT.interpret (Supply <$> pair1 <*> pair2)
+producerTducer ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → Transducer Void a m x
+producerTducer = over Producer do FT.interpret (Supply <$> pair1 <*> pair2)
 
-consumerT ∷ ∀ a m x. MonadRec m ⇒ Consumer a m x → Transducer a Void m x
-consumerT = over Consumer do FT.interpret (consume >>> Demand)
+consumerTducer ∷ ∀ a m x. MonadRec m ⇒ Consumer a m x → Transducer a Void m x
+consumerTducer = over Consumer do FT.interpret (consume >>> Demand)
 
-transducerP ∷ ∀ a m x. MonadRec m ⇒ Transducer Void a m x → Producer a m x
-transducerP = over Transducer do
+tducerProducer ∷ ∀ a m x. MonadRec m ⇒ Transducer Void a m x → Producer a m x
+tducerProducer = over Transducer do
   FT.interpret case _ of
-    Demand _ → unsafeThrow "Transducer.transducerP: Demand"
+    Demand _ → unsafeThrow "Transducer.tducerProducer: Demand"
     Supply a b → pair a b
 
-transducerC ∷ ∀ a m x. MonadRec m ⇒ Transducer a Void m x → Consumer a m x
-transducerC = over Transducer do
+tducerConsumer ∷ ∀ a m x. MonadRec m ⇒ Transducer a Void m x → Consumer a m x
+tducerConsumer = over Transducer do
   FT.interpret case _ of
     Demand f → Consume f
-    Supply _ _ → unsafeThrow "Transducer.transducerC: Supply"
+    Supply _ _ → unsafeThrow "Transducer.tducerConsumer: Supply"
 
-transducerT ∷ ∀ m x. MonadRec m ⇒ Transducer Void Void m x → Process m x
-transducerT = unTransducer >>> FT.interpret case _ of
-  Demand _impossible → unsafeThrow "Transducer.toTrampoline: Demand"
+tducerProcess ∷ ∀ m x. MonadRec m ⇒ Transducer Void Void m x → Process m x
+tducerProcess = un Transducer >>> FT.interpret case _ of
+  Demand _impossible → unsafeThrow "Transducer.tducerProcess: Demand"
   Supply _ t → Identity t

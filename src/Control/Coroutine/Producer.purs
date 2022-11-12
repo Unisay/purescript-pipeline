@@ -14,7 +14,7 @@ import Data.Align (class Align, align)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.Foldable (class Foldable, foldl, foldr)
-import Data.Newtype (class Newtype, over, unwrap, wrap)
+import Data.Newtype (class Newtype, over, un, unwrap, wrap)
 import Data.Pair (Pair, pair, pair1, pair2)
 import Data.These (These(..))
 import Data.Tuple (Tuple)
@@ -89,9 +89,6 @@ alignP
   → Producer c m r
 alignP f l r = flipFP (align f (flipPF l) (flipPF r))
 
-unProducer ∷ ∀ a m x. Producer a m x → Coroutine (Pair a) m x
-unProducer = unwrap
-
 emitP ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ x → Producer x m Unit
 emitP x = Producer (suspend (pair x pass))
 
@@ -134,10 +131,10 @@ producerFoldr = foldr (applySecond <<< emitP) (pure unit)
 producerFoldl ∷ ∀ f a m. Monad m ⇒ Foldable f ⇒ f a → Producer a m Unit
 producerFoldl = foldl (flip (applySecond <<< emitP)) (pure unit)
 
-runProducer ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → m (Pair (Array a) x)
-runProducer = unProducer >>>
+runProducer ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → m (Array a /\ x)
+runProducer = un Producer >>>
   ( identity # tailRecM2 \f g →
       FT.resume g <#> case _ of
         Right p → loop2 (f <<< Array.cons (pair1 p)) (pair2 p)
-        Left x → Done $ pair (f []) x
+        Left x → Done $ f [] /\ x
   )

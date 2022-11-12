@@ -27,7 +27,6 @@ import Control.Coroutine.Producer
   , producerIterate
   , producerUnfold
   , runProducer
-  , unProducer
   ) as Producer
 import Control.Coroutine.Receiver (class Receiver, receive) as Receiver
 import Control.Coroutine.Run (runProducerConsumer, runProducerConsumer') as Run
@@ -35,19 +34,18 @@ import Control.Coroutine.Transducer
   ( Transduce(..)
   , Transducer(..)
   , composeTransducers
-  , consumerT
+  , consumerTducer
   , emitT
   , liftT
-  , producerT
+  , producerTducer
   , receiveT
   , resumeT
   , scanT
+  , tducerConsumer
+  , tducerProcess
+  , tducerProducer
   , transduceAll
   , transduceWithState
-  , transducerC
-  , transducerP
-  , transducerT
-  , unTransducer
   , (>->)
   ) as Transducer
 

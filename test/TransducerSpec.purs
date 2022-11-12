@@ -4,11 +4,11 @@ import Custom.Prelude
 
 import Control.Coroutine
   ( Transducer
-  , consumerT
+  , consumerTducer
   , emit
   , runProducerConsumer
   , scanT
-  , transducerC
+  , tducerConsumer
   , (>->)
   )
 import Control.Coroutine.Duct (Duct(..))
@@ -24,12 +24,11 @@ spec = describe "Transducer" do
     let
       t ∷ ∀ r. Transducer Int String Aff r
       t = scanT (\s a → s <> show a) "" identity
-      c = transducerC (t >-> consumerT (take 5))
+      c = tducerConsumer (t >-> consumerTducer (take 5))
     runProducerConsumer (forever (emit 3)) c >>= case _ of
       LeftEnded _ _ → fail "Producer ended"
       BothEnded _ _ → fail "Both ended"
       RightEnded _ res → case res of
         BothEnded _ _ → fail "Both transduced"
         LeftEnded _unit _ → fail "Transduced first"
-        RightEnded _ outputs →
-          outputs `shouldEqual` [ "", "3", "33", "333", "3333" ]
+        RightEnded _ r → r `shouldEqual` [ "", "3", "33", "333", "3333" ]
