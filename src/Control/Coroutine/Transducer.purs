@@ -21,7 +21,6 @@ import Effect.Class (class MonadEffect)
 import Effect.Exception.Unsafe (unsafeThrow)
 
 --------------------------------------------------------------------------------
--- Transducer ------------------------------------------------------------------
 
 -- | A suspension functor that makes a coroutine which can either input
 -- | or output a value every time it suspends, but not both at the same time.

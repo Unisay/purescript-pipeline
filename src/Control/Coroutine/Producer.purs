@@ -3,22 +3,20 @@ module Control.Coroutine.Producer where
 import Custom.Prelude
 
 import Control.Apply (applySecond)
-import Control.Coroutine.Internal (Coroutine, loop, suspend)
+import Control.Coroutine.Duct (Duct(..))
+import Control.Coroutine.Internal (Coroutine, loop, suspend, zip)
 import Control.Monad.Except (class MonadTrans)
 import Control.Monad.Free.Trans (freeT)
 import Control.Monad.Free.Trans as FT
-import Control.Monad.Rec.Class
-  ( class MonadRec
-  , Step(..)
-  , loop2
-  , tailRecM
-  , tailRecM2
-  )
+import Control.Monad.Rec.Class (class MonadRec, Step(..), loop2, tailRecM, tailRecM2)
 import Control.Monad.Trans.Class (lift)
+import Data.Align (class Align, align)
 import Data.Array as Array
+import Data.Bifunctor (lmap)
 import Data.Foldable (class Foldable, foldl, foldr)
-import Data.Newtype (class Newtype, unwrap)
+import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Pair (Pair, pair, pair1, pair2)
+import Data.These (These(..))
 import Data.Tuple (Tuple)
 import Effect.Class (class MonadEffect)
 
@@ -35,6 +33,61 @@ derive newtype instance Monad m ⇒ MonadTrans (Producer a)
 derive newtype instance MonadEffect m ⇒ MonadEffect (Producer a m)
 instance Monad m ⇒ Monad (Producer a m)
 derive newtype instance Monad m ⇒ MonadRec (Producer a m)
+
+newtype ProducerF x m a = ProducerF (Coroutine (Pair a) m x)
+
+flipPF ∷ ∀ a m r. Producer a m r → ProducerF r m a
+flipPF = over Producer identity
+
+flipFP ∷ ∀ a m r. ProducerF r m a → Producer a m r
+flipFP = over ProducerF identity
+
+overF
+  ∷ ∀ b n p a m r
+  . (ProducerF p n a → ProducerF r m b)
+  → (Producer a n p → Producer b m r)
+overF f = flipPF >>> f >>> flipFP
+
+overP
+  ∷ ∀ b n p a m r
+  . (Producer a n p → Producer b m r)
+  → (ProducerF p n a → ProducerF r m b)
+overP f = flipFP >>> f >>> flipPF
+
+derive instance Newtype (ProducerF r m a) _
+
+instance Functor m ⇒ Functor (ProducerF r m) where
+  map f = overP (mapP f)
+
+mapP ∷ ∀ a b m r. Functor m ⇒ (a → b) → Producer a m r → Producer b m r
+mapP f = over Producer do FT.interpret (lmap f)
+
+instance (Semigroup r, MonadRec m) ⇒ Align (ProducerF r m) where
+  align
+    ∷ ∀ a b c
+    . (These a b → c)
+    → ProducerF r m a
+    → ProducerF r m b
+    → ProducerF r m c
+  align f ca cb = wrap (alignF (unwrap ca) (unwrap cb))
+    where
+    alignF a b = zip zap a b >>= case _ of
+      LeftEnded r mb → unwrap (mapP (f <<< That) (wrap mb)) <#> append r
+      RightEnded ma r → unwrap (mapP (f <<< This) (wrap ma)) <#> flip append r
+      BothEnded r1 r2 → pure $ r1 <> r2
+
+    zap ∷ ∀ u h j. (u → h → j) → Pair a u → Pair b h → Pair c j
+    zap t l r = pair (f (Both (pair1 l) (pair1 r))) (t (pair2 l) (pair2 r))
+
+alignP
+  ∷ ∀ a b c r m
+  . Semigroup r
+  ⇒ MonadRec m
+  ⇒ (These a b → c)
+  → Producer a m r
+  → Producer b m r
+  → Producer c m r
+alignP f l r = flipFP (align f (flipPF l) (flipPF r))
 
 unProducer ∷ ∀ a m x. Producer a m x → Coroutine (Pair a) m x
 unProducer = unwrap

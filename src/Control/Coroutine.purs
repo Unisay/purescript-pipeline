@@ -17,7 +17,10 @@ import Control.Coroutine.Consumer
 import Control.Coroutine.Emitter (class Emitter, emit) as Emitter
 import Control.Coroutine.Producer
   ( Producer(..)
+  , ProducerF(..)
+  , alignP
   , emitP
+  , mapP
   , producerEffect
   , producerFoldl
   , producerFoldr
