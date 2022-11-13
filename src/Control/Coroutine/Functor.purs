@@ -4,12 +4,14 @@ import Custom.Prelude
 
 import Data.Functor.Coproduct (Coproduct)
 import Data.Pair (Pair)
+import Data.Profunctor (class Profunctor)
 
 newtype Consume a b = Consume (a → b)
 
 consume ∷ ∀ a b. Consume a b → a → b
 consume (Consume f) = f
 
+derive newtype instance Profunctor Consume
 derive newtype instance Functor (Consume a)
 
 -- | A suspension functor that makes a coroutine which supplies an `output`

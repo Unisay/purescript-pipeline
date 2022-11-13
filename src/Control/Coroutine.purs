@@ -5,6 +5,7 @@ module Control.Coroutine
   , module Run
   , module Emitter
   , module Receiver
+  , module Duct
   ) where
 
 import Control.Coroutine.Consumer
@@ -12,14 +13,32 @@ import Control.Coroutine.Consumer
   , consumeWithState
   , receiveC
   , runConsumer
-  , unConsumer
   ) as Consumer
-import Control.Coroutine.Emitter (class Emitter, emit) as Emitter
+import Control.Coroutine.Duct
+  ( Duct(..)
+  , DuctError(..)
+  , SomeDuctError(..)
+  , bihoistDuct
+  , duct
+  , leftDuct
+  , mappendDuct
+  , rightDuct
+  , sappendDuct
+  , toThese
+  , unsafeLeftDuct
+  , unsafeRightDuct
+  ) as Duct
+import Control.Coroutine.Emitter
+  ( class Emitter
+  , emit
+  , emitM
+  ) as Emitter
 import Control.Coroutine.Producer
   ( Producer(..)
   , ProducerF(..)
   , alignP
   , emitP
+  , emitPM
   , mapP
   , producerEffect
   , producerFoldl
@@ -33,10 +52,13 @@ import Control.Coroutine.Run (runProducerConsumer, runProducerConsumer') as Run
 import Control.Coroutine.Transducer
   ( Transduce(..)
   , Transducer(..)
+  , appendProducerTransducer
   , composeTransducers
   , consumerTducer
   , emitT
+  , emitTM
   , liftT
+  , prependTransducerConsumer
   , producerTducer
   , receiveT
   , resumeT
@@ -46,6 +68,8 @@ import Control.Coroutine.Transducer
   , tducerProducer
   , transduceAll
   , transduceWithState
+  , (<%@>)
+  , (<@%>)
   , (>->)
   ) as Transducer
 

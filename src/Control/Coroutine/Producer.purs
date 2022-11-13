@@ -5,6 +5,7 @@ import Custom.Prelude
 import Control.Apply (applySecond)
 import Control.Coroutine.Duct (Duct(..))
 import Control.Coroutine.Internal (Coroutine, loop, suspend, zip)
+import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Except (class MonadTrans)
 import Control.Monad.Free.Trans (freeT)
 import Control.Monad.Free.Trans as FT
@@ -29,7 +30,8 @@ derive newtype instance Functor m ⇒ Functor (Producer a m)
 derive newtype instance Monad m ⇒ Apply (Producer a m)
 derive newtype instance Monad m ⇒ Applicative (Producer a m)
 derive newtype instance Monad m ⇒ Bind (Producer a m)
-derive newtype instance Monad m ⇒ MonadTrans (Producer a)
+derive newtype instance MonadTrans (Producer a)
+derive newtype instance MonadThrow e m ⇒ MonadThrow e (Producer a m)
 derive newtype instance MonadEffect m ⇒ MonadEffect (Producer a m)
 instance Monad m ⇒ Monad (Producer a m)
 derive newtype instance Monad m ⇒ MonadRec (Producer a m)
@@ -62,6 +64,9 @@ instance Functor m ⇒ Functor (ProducerF r m) where
 mapP ∷ ∀ a b m r. Functor m ⇒ (a → b) → Producer a m r → Producer b m r
 mapP f = over Producer do FT.interpret (lmap f)
 
+hoistP ∷ ∀ a m n r. Functor n ⇒ (m ~> n) → Producer a m r → Producer a n r
+hoistP f = over Producer do FT.hoistFreeT f
+
 instance (Semigroup r, MonadRec m) ⇒ Align (ProducerF r m) where
   align
     ∷ ∀ a b c
@@ -91,6 +96,9 @@ alignP f l r = flipFP (align f (flipPF l) (flipPF r))
 
 emitP ∷ ∀ m x. Monad m ⇒ Functor (Tuple x) ⇒ x → Producer x m Unit
 emitP x = Producer (suspend (pair x pass))
+
+emitPM ∷ ∀ m a. Monad m ⇒ m a → Producer a m Unit
+emitPM = lift >=> emitP
 
 -- | Create a `Producer` by providing a monadic function that produces values.
 -- |

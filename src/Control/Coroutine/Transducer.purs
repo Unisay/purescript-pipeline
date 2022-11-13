@@ -8,10 +8,12 @@ import Control.Coroutine.Functor (Consume(..), consume)
 import Control.Coroutine.Internal (Coroutine, suspend)
 import Control.Coroutine.Process (Process)
 import Control.Coroutine.Producer (Producer(..))
+import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Except (class MonadTrans)
 import Control.Monad.Free.Trans (FreeT, freeT)
 import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec)
+import Control.Monad.Trans.Class (lift)
 import Data.Identity (Identity(..))
 import Data.Newtype (class Newtype, over, un, unwrap, wrap)
 import Data.Pair (pair, pair1, pair2)
@@ -40,8 +42,9 @@ derive newtype instance Functor m ⇒ Functor (Transducer a b m)
 derive newtype instance Monad m ⇒ Apply (Transducer a b m)
 derive newtype instance Monad m ⇒ Applicative (Transducer a b m)
 derive newtype instance Monad m ⇒ Bind (Transducer a b m)
-derive newtype instance Monad m ⇒ MonadTrans (Transducer a b)
+derive newtype instance MonadTrans (Transducer a b)
 derive newtype instance MonadEffect m ⇒ MonadEffect (Transducer a b m)
+derive newtype instance MonadThrow e m ⇒ MonadThrow e (Transducer a b m)
 instance Monad m ⇒ Monad (Transducer a b m)
 derive newtype instance Monad m ⇒ MonadRec (Transducer a b m)
 
@@ -55,10 +58,13 @@ resumeT = un Transducer >>> FT.resume
 emitT ∷ ∀ m a b. Monad m ⇒ b → Transducer a b m Unit
 emitT b = Transducer $ suspend $ Supply b pass
 
+emitTM ∷ ∀ m a b. Monad m ⇒ m b → Transducer a b m Unit
+emitTM = lift >=> emitT
+
 receiveT ∷ ∀ m a b. Monad m ⇒ Transducer a b m a
 receiveT = Transducer $ suspend $ Demand pure
 
-liftT ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Unit
+liftT ∷ ∀ m a b. Monad m ⇒ (a → b) → Transducer a b m Void
 liftT f = receiveT >>= \a → emitT (f a) *> liftT f
 
 transduceAll ∷ ∀ m a b. Monad m ⇒ (a → Array b) → Transducer a b m Unit
@@ -96,7 +102,7 @@ composeTransducers t1 t2 = Transducer $ freeT \_ → do
   let composeUnder a b = unwrap (wrap a >-> wrap b)
   case e1, e2 of
     Left x, Left y → pure $ Left $ BothEnded x y
-    Left x, Right _ → pure $ Left $ LeftEnded x t2
+    Left x, Right (Demand _) → pure $ Left $ LeftEnded x t2
     Right _, Left y → pure $ Left $ RightEnded t1 y
     Right (Demand f), l →
       pure $ Right $ Demand \a → f a `composeUnder` freeT \_ → pure l
@@ -106,25 +112,45 @@ composeTransducers t1 t2 = Transducer $ freeT \_ → do
 
 infixr 9 composeTransducers as >->
 
-producerTducer ∷ ∀ a m x. MonadRec m ⇒ Producer a m x → Transducer Void a m x
+producerTducer ∷ ∀ a m x. Functor m ⇒ Producer a m x → Transducer Void a m x
 producerTducer = over Producer do FT.interpret (Supply <$> pair1 <*> pair2)
 
-consumerTducer ∷ ∀ a m x. MonadRec m ⇒ Consumer a m x → Transducer a Void m x
+consumerTducer ∷ ∀ a m x. Functor m ⇒ Consumer a m x → Transducer a Void m x
 consumerTducer = over Consumer do FT.interpret (consume >>> Demand)
 
-tducerProducer ∷ ∀ a m x. MonadRec m ⇒ Transducer Void a m x → Producer a m x
+tducerProducer ∷ ∀ a m x. Functor m ⇒ Transducer Void a m x → Producer a m x
 tducerProducer = over Transducer do
   FT.interpret case _ of
     Demand _ → unsafeThrow "Transducer.tducerProducer: Demand"
     Supply a b → pair a b
 
-tducerConsumer ∷ ∀ a m x. MonadRec m ⇒ Transducer a Void m x → Consumer a m x
+tducerConsumer ∷ ∀ a m x. Functor m ⇒ Transducer a Void m x → Consumer a m x
 tducerConsumer = over Transducer do
   FT.interpret case _ of
     Demand f → Consume f
     Supply _ _ → unsafeThrow "Transducer.tducerConsumer: Supply"
 
-tducerProcess ∷ ∀ m x. MonadRec m ⇒ Transducer Void Void m x → Process m x
+tducerProcess ∷ ∀ m x. Functor m ⇒ Transducer Void Void m x → Process m x
 tducerProcess = un Transducer >>> FT.interpret case _ of
   Demand _impossible → unsafeThrow "Transducer.tducerProcess: Demand"
   Supply _ t → Identity t
+
+appendProducerTransducer
+  ∷ ∀ a b m x y
+  . MonadRec m
+  ⇒ Producer a m x
+  → Transducer a b m y
+  → Producer b m (Duct (Transducer Void a m) (Transducer a b m) x y)
+appendProducerTransducer p t = tducerProducer (producerTducer p >-> t)
+
+infixr 5 appendProducerTransducer as <@%>
+
+prependTransducerConsumer
+  ∷ ∀ a b m x y
+  . MonadRec m
+  ⇒ Transducer a b m x
+  → Consumer b m y
+  → Consumer a m (Duct (Transducer a b m) (Transducer b Void m) x y)
+prependTransducerConsumer t c = tducerConsumer (t >-> consumerTducer c)
+
+infixr 5 prependTransducerConsumer as <%@>

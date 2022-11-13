@@ -2,7 +2,7 @@ module Control.Coroutine.Run where
 
 import Custom.Prelude
 
-import Control.Coroutine.Consumer (Consumer(..), unConsumer)
+import Control.Coroutine.Consumer (Consumer(..))
 import Control.Coroutine.Duct (Duct, bihoistDuct)
 import Control.Coroutine.Functor (Consume(..), consume)
 import Control.Coroutine.Internal (zip)
@@ -23,7 +23,7 @@ runProducerConsumer
   → Consumer a m y
   → m (Duct (Producer a m) (Consumer a m) x y)
 runProducerConsumer p c = bihoistDuct wrap wrap <$>
-  runFreeT (pure <<< unwrap) (zip zap (un Producer p) (unConsumer c))
+  runFreeT (pure <<< unwrap) (zip zap (un Producer p) (un Consumer c))
   where
   zap ∷ ∀ h b c d. (b → c → d) → Pair h b → Consume h c → Identity d
   zap bc pair hc = Identity (bc b (consume hc h))
