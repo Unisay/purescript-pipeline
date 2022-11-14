@@ -17,13 +17,15 @@ import Control.Coroutine.Consumer
 import Control.Coroutine.Duct
   ( Duct(..)
   , DuctError(..)
-  , SomeDuctError(..)
+  , absurdDuct
+  , absurdLeft
+  , absurdRight
+  , appendDuct
+  , appendDuctE
   , bihoistDuct
   , duct
   , leftDuct
-  , mappendDuct
   , rightDuct
-  , sappendDuct
   , toThese
   , unsafeLeftDuct
   , unsafeRightDuct

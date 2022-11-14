@@ -40,18 +40,16 @@ toThese = duct (const <<< This) (const That) Both
 
 data DuctError a b = ErrLeftEnded a | ErrRightEnded b
 
-newtype SomeDuctError = SomeDuctError (∀ a b. DuctError a b)
-
-sappendDuct ∷ ∀ m n s. Semigroup s ⇒ Duct m n s s → Either (DuctError s s) s
-sappendDuct = case _ of
+appendDuctE ∷ ∀ m n s. Semigroup s ⇒ Duct m n s s → Either (DuctError s s) s
+appendDuctE = case _ of
   LeftEnded a _nb → Left (ErrLeftEnded a)
   RightEnded _ma b → Left (ErrRightEnded b)
   BothEnded s1 s2 → Right (s1 <> s2)
 
-mappendDuct ∷ ∀ m n s. Monoid s ⇒ Duct m n s s → s
-mappendDuct = case _ of
-  LeftEnded _s _nb → mempty
-  RightEnded _ma _s → mempty
+appendDuct ∷ ∀ m n s. Semigroup s ⇒ Duct m n s s → s
+appendDuct = case _ of
+  LeftEnded s _nb → s
+  RightEnded _ma s → s
   BothEnded s1 s2 → s1 <> s2
 
 leftDuct ∷ ∀ m n a. Duct m n a Unit → Either (DuctError a Unit) a
@@ -60,7 +58,7 @@ leftDuct = case _ of
   RightEnded _ma b → Left (ErrRightEnded b)
   BothEnded a _b → Right a
 
-unsafeLeftDuct ∷ ∀ m n a. Duct m n a Unit → a
+unsafeLeftDuct ∷ ∀ m n a b. Duct m n a b → a
 unsafeLeftDuct = case _ of
   LeftEnded a _nb → a
   RightEnded _ma _unit → unsafeCrashWith "unsafeLeftDuct: right ended"
@@ -72,7 +70,7 @@ rightDuct = case _ of
   RightEnded _ma b → Right b
   BothEnded _a b → Right b
 
-unsafeRightDuct ∷ ∀ m n b. Duct m n Unit b → b
+unsafeRightDuct ∷ ∀ m n a b. Duct m n a b → b
 unsafeRightDuct = case _ of
   LeftEnded _a _nb → unsafeCrashWith "unsafeRightDuct: left ended"
   RightEnded _ma b → b
@@ -80,18 +78,18 @@ unsafeRightDuct = case _ of
 
 absurdDuct ∷ ∀ m n a. Duct m n Void Void → a
 absurdDuct = case _ of
-  LeftEnded a _nb → absurd a
-  RightEnded _ma b → absurd b
-  BothEnded a _b → absurd a
+  LeftEnded void _nb → absurd void
+  RightEnded _ma void → absurd void
+  BothEnded void _b → absurd void
 
 absurdLeft ∷ ∀ m n b. Duct m n Void b → Either (n b) b
 absurdLeft = case _ of
   LeftEnded a _nb → absurd a
-  RightEnded _ma b → Right b
+  RightEnded _mv b → Right b
   BothEnded a _b → absurd a
 
 absurdRight ∷ ∀ m n a. Duct m n a Void → Either (m a) a
 absurdRight = case _ of
-  LeftEnded a _nb → Right a
+  LeftEnded a _nv → Right a
   RightEnded _ma b → absurd b
   BothEnded _a b → absurd b
