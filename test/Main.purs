@@ -9,6 +9,7 @@ import Effect.Aff (Aff, launchAff_)
 import Effect.Class (class MonadEffect)
 import Effect.Class.Console (log)
 import Test.ConsumerSpec as Consumer
+import Test.InteractionSpec as Interaction
 import Test.ProducerSpec as Producer
 import Test.RunSpec as Run
 import Test.Spec.Reporter (consoleReporter)
@@ -21,6 +22,7 @@ main = launchAff_ $ runSpec [ consoleReporter ] do
   Producer.spec
   Consumer.spec
   Transducer.spec
+  Interaction.spec
 
 --------------------------------------------------------------------------------
 -- Producer/Consumer test ------------------------------------------------------
