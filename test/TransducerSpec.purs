@@ -4,7 +4,9 @@ import Custom.Prelude
 
 import Control.Coroutine.Consumer (runConsumer)
 import Control.Coroutine.Duct (Duct(..), absurdLeft)
+import Control.Coroutine.Emitter (emit)
 import Control.Coroutine.Producer (emitP, runProducer)
+import Control.Coroutine.Receiver (receive)
 import Control.Coroutine.Run (runProducerConsumer)
 import Control.Coroutine.Transducer (Transducer, liftT, scanT, (<%@>), (<@%>))
 import Control.Monad.Rec.Class (forever)
@@ -31,8 +33,12 @@ spec = describe "Transducer" do
     out /\ _ ← runProducer (produceFromTo 1 5 <@%> liftT show)
     out `shouldEqual` [ "1", "2", "3", "4", "5" ]
   it "prepends to consumer" do
-    d ← runConsumer (1 .. 5) (liftT show <%@> take 5)
+    let
+      t = forever do
+        i ← receive
+        if i < 3 then emit ("<" <> show i)
+        else emit (">" <> show i)
+    d ← runConsumer (1 .. 5) (t <%@> take 5)
     case absurdLeft d of
       Left _t → fail "Remaining consumer"
-      Right res → res `shouldEqual` [ "1", "2", "3", "4", "5" ]
-
+      Right res → res `shouldEqual` [ "<1", "<2", ">3", ">4", ">5" ]

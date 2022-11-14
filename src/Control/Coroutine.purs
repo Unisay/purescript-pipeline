@@ -6,6 +6,7 @@ module Control.Coroutine
   , module Emitter
   , module Receiver
   , module Duct
+  , module Interaction
   ) where
 
 import Control.Coroutine.Consumer
@@ -35,6 +36,15 @@ import Control.Coroutine.Emitter
   , emit
   , emitM
   ) as Emitter
+import Control.Coroutine.Interaction
+  ( Act(..)
+  , Action(..)
+  , React(..)
+  , Reaction(..)
+  , act
+  , interact
+  , react
+  ) as Interaction
 import Control.Coroutine.Producer
   ( Producer(..)
   , ProducerF(..)
