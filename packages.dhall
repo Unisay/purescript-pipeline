@@ -8,7 +8,7 @@ let additions =
       { custom-prelude =
         { dependencies = [ "debug", "either", "maybe", "prelude", "strings" ]
         , repo = "https://github.com/Unisay/purescript-custom-prelude.git"
-        , version = "v1.2.0"
+        , version = "v1.3.0"
         }
       }
 

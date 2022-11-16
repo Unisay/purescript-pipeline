@@ -29,6 +29,7 @@
               epkgs.purs-tidy
               epkgs.spago
               epkgs.zephyr
+              pkgs.nodejs-16_x
             ];
           };
       });

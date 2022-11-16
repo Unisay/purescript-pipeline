@@ -10,3 +10,4 @@ output-es
 .direnv
 .spago
 .psc-ide-port
+*.code-workspace
