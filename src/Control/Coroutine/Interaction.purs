@@ -6,11 +6,12 @@ import Control.Coroutine.Duct (Duct, bihoistDuct)
 import Control.Coroutine.Internal (Coroutine, zip)
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Free.Trans (freeT, runFreeT)
+import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.Trans.Class (class MonadTrans)
 import Control.Monad.Writer.Class (class MonadTell)
 import Data.Bifunctor (lmap)
-import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Effect.Class (class MonadEffect)
 
 --------------------------------------------------------------------------------
@@ -37,6 +38,16 @@ derive newtype instance Monad m ⇒ MonadRec (Act q r m)
 act ∷ ∀ q r m end. Monad m ⇒ q → (r → Act q r m end) → Act q r m end
 act q f = Act $ freeT \_ → pure $ Right $ Action q \r → unwrap (f r)
 
+codimapAct
+  ∷ ∀ a b c d m r
+  . Functor m
+  ⇒ (a → b)
+  → (c → d)
+  → Act a d m r
+  → Act b c m r
+codimapAct ab cd = over Act do
+  FT.interpret \(Action a dk) → Action (ab a) (cd >>> dk)
+
 --------------------------------------------------------------------------------
 -- React -----------------------------------------------------------------------
 
@@ -62,6 +73,16 @@ derive newtype instance Monad m ⇒ MonadRec (React q r m)
 
 react ∷ ∀ q r m. Monad m ⇒ (q → m r) → React q r m Unit
 react f = React $ freeT \_ → pure $ Right $ wrap \q → Tuple <$> f q <@> pass
+
+dimapReact
+  ∷ ∀ a b c d m r
+  . Functor m
+  ⇒ (a → b)
+  → (c → d)
+  → React b c m r
+  → React a d m r
+dimapReact ab cd = over React do
+  FT.interpret \r → wrap (ab >>> unwrap r >>> map (lmap cd))
 
 --------------------------------------------------------------------------------
 -- Interact --------------------------------------------------------------------
