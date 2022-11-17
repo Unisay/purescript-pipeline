@@ -2,10 +2,11 @@ module Control.Coroutine.Interaction where
 
 import Custom.Prelude
 
+import Control.Bind (bindFlipped)
 import Control.Coroutine.Duct (Duct, bihoistDuct)
 import Control.Coroutine.Internal (Coroutine, zip)
 import Control.Monad.Error.Class (class MonadThrow)
-import Control.Monad.Free.Trans (freeT, runFreeT)
+import Control.Monad.Free.Trans (FreeT, freeT, runFreeT)
 import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec)
 import Control.Monad.Trans.Class (class MonadTrans)
@@ -47,6 +48,32 @@ codimapAct
   → Act b c m r
 codimapAct ab cd = over Act do
   FT.interpret \(Action a dk) → Action (ab a) (cd >>> dk)
+
+lmapAct
+  ∷ ∀ a b c m r
+  . MonadRec m
+  ⇒ (a → Either r b)
+  → Act a c m r
+  → Act b c m r
+lmapAct f = over Act lmapFAct
+  where
+  lmapFAct ∷ FreeT (Action a c) m r → FreeT (Action b c) m r
+  lmapFAct co = freeT \_ →
+    FT.resume co <#> bindFlipped \(Action a k) →
+      f a <#> \b → (Action b (lmapFAct <$> k))
+
+rcmapAct
+  ∷ ∀ a b c m r
+  . MonadRec m
+  ⇒ (c → Either r b)
+  → Act a b m r
+  → Act a c m r
+rcmapAct f = over Act rcmapFAct
+  where
+  rcmapFAct ∷ FreeT (Action a b) m r → FreeT (Action a c) m r
+  rcmapFAct co = freeT \_ →
+    FT.resume co <<#>> \(Action a k) →
+      Action a $ either pure (rcmapFAct <<< k) <<< f
 
 --------------------------------------------------------------------------------
 -- React -----------------------------------------------------------------------
