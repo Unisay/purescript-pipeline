@@ -6,8 +6,9 @@ import Control.Coroutine.Consumer (Consumer, receiveC)
 import Control.Coroutine.Duct (Duct(..))
 import Control.Coroutine.Interaction (Act, React, act, actProducerConsumer, interact, lmapAct, rcmapAct, react, reactConsumerProducer)
 import Control.Coroutine.Producer (Producer, emitP)
-import Control.Monad.Rec.Class (Step(..), tailRecM)
+import Control.Monad.Rec.Class (Step(..), forever, tailRecM)
 import Control.Monad.Writer (class MonadTell, runWriterT, tell)
+import Effect.Class (class MonadEffect)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 
@@ -166,6 +167,22 @@ spec = describe "Interaction" do
           <> renderServerResult serverDuct
           <> ".\nLog:\n"
           <> unlines log
+
+  it "interact is stack safe" do
+    let
+      c ∷ ∀ m. MonadEffect m ⇒ Act Int Int m String
+      c = go 1
+        where
+        go n = act n case _ of
+          s | s == 900000 → pure $ show s <> " iterations."
+          _ → go (n + 1)
+
+      r ∷ ∀ m. Monad m ⇒ React Int Int m Unit
+      r = forever $ react \n → pure (n + 1)
+
+    interact c r >>= case _ of
+      LeftEnded "900000 iterations." _r → pass
+      _ → fail "Client is expected to end first"
 
 newtype ClientSends = Ping Int
 type ServerReceives = ClientSends

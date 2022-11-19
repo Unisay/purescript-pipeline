@@ -11,11 +11,16 @@ data Duct m n a b
   = LeftEnded a (n b)
   -- ^ Left couroutine ended with `a`, remaining right coroutine is `n b`
   | RightEnded (m a) b
-  -- ^ Remaining left coroutine is `m a`, right couroutine ended with `b`, 
+  -- ^ Remaining left coroutine is `m a`, right couroutine ended with `b`,
   | BothEnded a b -- Both coroutines ended with `a` and `b` respectively.
 
 duct
-  ∷ ∀ m n a b r. (a → n b → r) → (m a → b → r) → (a → b → r) → Duct m n a b → r
+  ∷ ∀ m n a b r
+  . (a → n b → r)
+  → (m a → b → r)
+  → (a → b → r)
+  → Duct m n a b
+  → r
 duct left right both = case _ of
   LeftEnded a nb → left a nb
   RightEnded ma b → right ma b
@@ -39,6 +44,11 @@ toThese ∷ ∀ m n a b. Duct m n a b → These a b
 toThese = duct (const <<< This) (const That) Both
 
 data DuctError a b = ErrLeftEnded a | ErrRightEnded b
+
+instance (Show a, Show b) ⇒ Show (DuctError a b) where
+  show = case _ of
+    ErrLeftEnded a → "ErrLeftEnded " <> show a
+    ErrRightEnded b → "ErrRightEnded " <> show b
 
 appendDuctE ∷ ∀ m n s. Semigroup s ⇒ Duct m n s s → Either (DuctError s s) s
 appendDuctE = case _ of
