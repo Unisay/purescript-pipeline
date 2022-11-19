@@ -2,9 +2,8 @@ module Control.Coroutine.Transducer where
 
 import Custom.Prelude
 
-import Control.Coroutine.Consumer (Consumer(..))
+import Control.Coroutine.Consumer (Consume(..), Consumer(..))
 import Control.Coroutine.Duct (Duct(..))
-import Control.Coroutine.Functor (Consume(..), consume)
 import Control.Coroutine.Internal (Coroutine, suspend)
 import Control.Coroutine.Process (Process)
 import Control.Coroutine.Producer (Producer(..))
@@ -116,7 +115,7 @@ producerTducer ∷ ∀ a m x. Functor m ⇒ Producer a m x → Transducer Void a
 producerTducer = over Producer do FT.interpret (Supply <$> pair1 <*> pair2)
 
 consumerTducer ∷ ∀ a m x. Functor m ⇒ Consumer a m x → Transducer a Void m x
-consumerTducer = over Consumer do FT.interpret (consume >>> Demand)
+consumerTducer = over Consumer do FT.interpret (un Consume >>> Demand)
 
 tducerProducer ∷ ∀ a m x. Functor m ⇒ Transducer Void a m x → Producer a m x
 tducerProducer = over Transducer do

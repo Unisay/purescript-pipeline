@@ -2,8 +2,7 @@ module Control.Coroutine.Process where
 
 import Custom.Prelude
 
-import Control.Coroutine.Consumer (Consumer)
-import Control.Coroutine.Functor (Consume(..))
+import Control.Coroutine.Consumer (Consume(..), Consumer)
 import Control.Coroutine.Internal (Coroutine, fuseWith, suspend)
 import Control.Coroutine.Producer (Producer)
 import Control.Monad.Free.Trans (runFreeT)

@@ -3,9 +3,8 @@ module Control.Coroutine.Interaction where
 import Custom.Prelude
 
 import Control.Bind (bindFlipped)
-import Control.Coroutine.Consumer (Consumer)
+import Control.Coroutine.Consumer (Consume, Consumer)
 import Control.Coroutine.Duct (Duct, bihoistDuct)
-import Control.Coroutine.Functor (Consume)
 import Control.Coroutine.Internal (Coroutine, zip)
 import Control.Coroutine.Producer (Producer)
 import Control.Monad.Error.Class (class MonadThrow)
@@ -22,6 +21,8 @@ import Effect.Class (class MonadEffect)
 --------------------------------------------------------------------------------
 -- Act -------------------------------------------------------------------------
 
+-- | A suspension functor that makes a coroutine which supplies an `output`
+-- | and consumes an `input` before it can proceed.
 data Action q r a = Action q (r → a)
 
 derive instance Functor (Action q r)
@@ -94,6 +95,8 @@ rcmapAct f = over Act rcmapFAct
 --------------------------------------------------------------------------------
 -- React -----------------------------------------------------------------------
 
+-- | A suspension functor that makes a coroutine which consumes a `q`
+-- | and proceeds by running effect producing its result `r`.
 newtype Reaction ∷ Type → Type → (Type → Type) → Type → Type
 newtype Reaction q r m a = Reaction (q → m (Tuple r a))
 

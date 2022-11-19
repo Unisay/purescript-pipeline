@@ -2,7 +2,6 @@ module Control.Coroutine.Consumer where
 
 import Custom.Prelude
 
-import Control.Coroutine.Functor (Consume(..))
 import Control.Coroutine.Internal (Coroutine, suspend)
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Except (class MonadTrans)
@@ -10,9 +9,17 @@ import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec, Step(..), loop2, tailRecM2)
 import Data.Array as Array
 import Data.Newtype (class Newtype, over, un)
-import Data.Profunctor (lcmap)
+import Data.Profunctor (class Profunctor, lcmap)
 import Effect.Class (class MonadEffect)
 import Effect.Exception.Unsafe (unsafeThrow)
+
+--------------------------------------------------------------------------------
+
+newtype Consume a b = Consume (Function a b)
+
+derive instance Newtype (Consume a b) _
+derive newtype instance Profunctor Consume
+derive newtype instance Functor (Consume a)
 
 --------------------------------------------------------------------------------
 

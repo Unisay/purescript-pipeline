@@ -12,7 +12,6 @@
   , "foldable-traversable"
   , "freet"
   , "functions"
-  , "functors"
   , "identity"
   , "newtype"
   , "parallel"
