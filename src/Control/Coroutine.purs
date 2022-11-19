@@ -42,8 +42,14 @@ import Control.Coroutine.Interaction
   , React(..)
   , Reaction(..)
   , act
+  , actProducerConsumer
+  , codimapAct
+  , dimapReact
   , interact
+  , lmapAct
+  , rcmapAct
   , react
+  , reactConsumerProducer
   ) as Interaction
 import Control.Coroutine.Producer
   ( Producer(..)

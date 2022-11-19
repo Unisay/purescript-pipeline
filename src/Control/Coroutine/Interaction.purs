@@ -3,16 +3,20 @@ module Control.Coroutine.Interaction where
 import Custom.Prelude
 
 import Control.Bind (bindFlipped)
+import Control.Coroutine.Consumer (Consumer)
 import Control.Coroutine.Duct (Duct, bihoistDuct)
+import Control.Coroutine.Functor (Consume)
 import Control.Coroutine.Internal (Coroutine, zip)
+import Control.Coroutine.Producer (Producer)
 import Control.Monad.Error.Class (class MonadThrow)
 import Control.Monad.Free.Trans (FreeT, freeT, runFreeT)
 import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec)
-import Control.Monad.Trans.Class (class MonadTrans)
+import Control.Monad.Trans.Class (class MonadTrans, lift)
 import Control.Monad.Writer.Class (class MonadTell)
 import Data.Bifunctor (lmap)
 import Data.Newtype (class Newtype, over, unwrap, wrap)
+import Data.Pair (Pair, pair1, pair2)
 import Effect.Class (class MonadEffect)
 
 --------------------------------------------------------------------------------
@@ -39,6 +43,18 @@ derive newtype instance Monad m ⇒ MonadRec (Act q r m)
 act ∷ ∀ q r m end. Monad m ⇒ q → (r → Act q r m end) → Act q r m end
 act q f = Act $ freeT \_ → pure $ Right $ Action q \r → unwrap (f r)
 
+actProducerConsumer
+  ∷ ∀ a b m p c
+  . MonadRec m
+  ⇒ Producer a m p
+  → Consumer b m c
+  → Act a b m (Duct (Producer a m) (Consumer b m) p c)
+actProducerConsumer p c =
+  wrap $ bihoistDuct wrap wrap <$> zip zap (unwrap p) (unwrap c)
+  where
+  zap ∷ ∀ x y z. (x → y → z) → Pair a x → Consume b y → Action a b z
+  zap xyz ax by = Action (pair1 ax) \b → xyz (pair2 ax) (unwrap by b)
+
 codimapAct
   ∷ ∀ a b c d m r
   . Functor m
@@ -60,7 +76,7 @@ lmapAct f = over Act lmapFAct
   lmapFAct ∷ FreeT (Action a c) m r → FreeT (Action b c) m r
   lmapFAct co = freeT \_ →
     FT.resume co <#> bindFlipped \(Action a k) →
-      f a <#> \b → (Action b (lmapFAct <$> k))
+      f a <#> \b → Action b (lmapFAct <$> k)
 
 rcmapAct
   ∷ ∀ a b c m r
@@ -97,9 +113,23 @@ derive newtype instance MonadEffect m ⇒ MonadEffect (React q r m)
 derive newtype instance MonadTell w m ⇒ MonadTell w (React q r m)
 instance Monad m ⇒ Monad (React q r m)
 derive newtype instance Monad m ⇒ MonadRec (React q r m)
+instance MonadTrans (React q r) where
+  lift = wrap <<< lift
 
 react ∷ ∀ q r m. Monad m ⇒ (q → m r) → React q r m Unit
 react f = React $ freeT \_ → pure $ Right $ wrap \q → Tuple <$> f q <@> pass
+
+reactConsumerProducer
+  ∷ ∀ a b m p c
+  . MonadRec m
+  ⇒ Consumer a m c
+  → Producer b m p
+  → React a b m (Duct (Consumer a m) (Producer b m) c p)
+reactConsumerProducer c p =
+  wrap $ bihoistDuct wrap wrap <$> zip zap (unwrap c) (unwrap p)
+  where
+  zap ∷ ∀ x y z. (x → y → z) → Consume a x → Pair b y → Reaction a b m z
+  zap xyz ax by = wrap \a → pure (pair1 by /\ xyz (unwrap ax a) (pair2 by))
 
 dimapReact
   ∷ ∀ a b c d m r
