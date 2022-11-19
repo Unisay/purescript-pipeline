@@ -3,15 +3,19 @@ module Control.Coroutine.Run where
 import Custom.Prelude
 
 import Control.Coroutine.Consumer (Consumer(..))
-import Control.Coroutine.Duct (Duct, bihoistDuct)
+import Control.Coroutine.Duct (Duct(..), bihoistDuct)
 import Control.Coroutine.Functor (Consume(..), consume)
 import Control.Coroutine.Internal (zip)
 import Control.Coroutine.Producer (Producer(..))
 import Control.Monad.Free.Trans (runFreeT)
 import Control.Monad.Free.Trans as FT
 import Control.Monad.Rec.Class (class MonadRec, Step(..), loop2, tailRecM2)
+import Data.Array as Array
+import Data.Array.NonEmpty (NonEmptyArray)
+import Data.Array.NonEmpty as NEA
 import Data.Identity (Identity(..))
 import Data.Newtype (un, unwrap, wrap)
+import Data.NonEmpty ((:|))
 import Data.Pair (Pair, pair1, pair2)
 
 --------------------------------------------------------------------------------
@@ -43,3 +47,22 @@ runProducerConsumer' = tailRecM2 \producer consumer → do
     Right p, Left y → loop2 (Producer $ pair2 p) (pure y)
     Left x, Right (Consume f) → loop2 (pure x) (Consumer $ f Nothing)
     Left x, Left y → Done (x /\ y)
+
+runProducerConsumers
+  ∷ ∀ a m r l
+  . MonadRec m
+  ⇒ Producer a m r
+  → NonEmptyArray (Consumer a m l)
+  → m (Duct (Producer a m) (Tuple (Array (Consumer a m l))) r (Array l))
+runProducerConsumers = go []
+  where
+  go acc producer consumers =
+    runProducerConsumer producer (NEA.head consumers) >>=
+      case _, NEA.tail consumers of
+        BothEnded r l, [] → pure $ BothEnded r (Array.snoc acc l)
+        BothEnded r l, cs → pure $ LeftEnded r $ cs /\ (Array.snoc acc l)
+        LeftEnded r c, cs → pure $ LeftEnded r $ Array.cons c cs /\ []
+        RightEnded p l, cs → case Array.uncons cs of
+          Just { head, tail } →
+            go (Array.snoc acc l) p (NEA.fromNonEmpty $ head :| tail)
+          Nothing → pure $ RightEnded p (Array.snoc acc l)
