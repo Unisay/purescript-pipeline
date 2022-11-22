@@ -48,8 +48,8 @@ spec = describe "Run" do
         (NEA.replicate 5 (take 5)) >>= case _ of
         LeftEnded _ _ → fail "Producer ended"
         RightEnded _ _ → fail "Consumers ended"
-        BothEnded _ result → result `shouldEqual`
-          [ 1 .. 5, 6 .. 10, 11 .. 15, 16 .. 20, 21 .. 25 ]
+        BothEnded _ result →
+          result `shouldEqual` [ 1 .. 5, 6 .. 10, 11 .. 15, 16 .. 20, 21 .. 25 ]
 
     it "handles end of producer and consumer with remaining consumers" do
       runProducerConsumers (produceFromTo 1 20) (NEA.replicate 5 (take 5))
@@ -81,8 +81,8 @@ spec = describe "Run" do
       runProducerConsumers (forever (emit 1)) ((NEA.replicate 5 (take 5)))
         >>= case _ of
           LeftEnded _ _ → fail "Producer ended"
-          RightEnded _ result → result `shouldEqual` Array.replicate 5
-            (Array.replicate 5 1)
+          RightEnded _ result →
+            result `shouldEqual` Array.replicate 5 (Array.replicate 5 1)
           BothEnded _ _ → fail "Both ended"
 
     it "is stack free" do
