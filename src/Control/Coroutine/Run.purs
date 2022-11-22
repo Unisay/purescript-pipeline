@@ -57,11 +57,11 @@ runProducerConsumers
 runProducerConsumers = go []
   where
   go acc producer consumers =
-    runProducerConsumer producer (NEA.head consumers) >>=
-      case _, NEA.tail consumers of
+    runProducerConsumer producer (NEA.head consumers) >>= \result →
+      case result, NEA.tail consumers of
         BothEnded r l, [] → pure $ BothEnded r (Array.snoc acc l)
         BothEnded r l, cs → pure $ LeftEnded r $ cs /\ (Array.snoc acc l)
-        LeftEnded r c, cs → pure $ LeftEnded r $ Array.cons c cs /\ []
+        LeftEnded r c, cs → pure $ LeftEnded r $ Array.cons c cs /\ acc
         RightEnded p l, cs → case Array.uncons cs of
           Just { head, tail } →
             go (Array.snoc acc l) p (NEA.fromNonEmpty $ head :| tail)

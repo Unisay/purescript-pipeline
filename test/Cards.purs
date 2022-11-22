@@ -7,13 +7,10 @@ import Control.Coroutine.Consumer (consumeWithState)
 import Control.Coroutine.Duct (Duct(..))
 import Control.Coroutine.Producer (producerUnfold)
 import Control.Coroutine.Run (runProducerConsumer)
-import Control.Monad.Rec.Class (class MonadRec)
 import Data.Array ((..))
 import Data.Array as Array
-import Data.Array.NonEmpty (NonEmptyArray)
 import Data.Array.NonEmpty as NEA
 import Data.Enum (toEnum)
-import Data.NonEmpty ((:|))
 import Data.Profunctor.Strong ((&&&))
 import Data.String (CodePoint)
 import Data.String.CodePoints (fromCodePointArray)
@@ -81,22 +78,3 @@ foldCards = generator >>> go 1
             <> ": "
             <> fromCodePointArray consumerRes
           go (counter + 1) gen' remainingPlayers
-
-runProducerConsumers
-  ∷ ∀ a m r l
-  . MonadRec m
-  ⇒ Producer a m r
-  → NonEmptyArray (Consumer a m l)
-  → m (Duct (Producer a m) (Tuple (Array (Consumer a m l))) r (Array l))
-runProducerConsumers = go []
-  where
-  go acc producer consumers =
-    runProducerConsumer producer (NEA.head consumers) >>=
-      case _, NEA.tail consumers of
-        BothEnded r l, [] → pure $ BothEnded r [ l ]
-        BothEnded r l, cs → pure $ LeftEnded r $ cs /\ [ l ]
-        LeftEnded r c, cs → pure $ LeftEnded r $ Array.cons c cs /\ []
-        RightEnded p l, cs → case Array.uncons cs of
-          Just { head, tail } →
-            go (Array.snoc acc l) p (NEA.fromNonEmpty $ head :| tail)
-          Nothing → pure $ RightEnded p (Array.snoc acc l)

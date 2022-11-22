@@ -16,6 +16,7 @@
   , "functors"
   , "identity"
   , "newtype"
+  , "nonempty"
   , "parallel"
   , "partial"
   , "prelude"
