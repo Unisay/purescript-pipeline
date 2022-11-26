@@ -7,6 +7,8 @@ module Control.Coroutine
   , module Receiver
   , module Duct
   , module Interaction
+  , exceptResult
+  , tryExceptCo
   ) where
 
 import Control.Coroutine.Consumer
@@ -31,11 +33,7 @@ import Control.Coroutine.Duct
   , unsafeLeftDuct
   , unsafeRightDuct
   ) as Duct
-import Control.Coroutine.Emitter
-  ( class Emitter
-  , emit
-  , emitM
-  ) as Emitter
+import Control.Coroutine.Emitter (class Emitter, emit, emitM) as Emitter
 import Control.Coroutine.Interaction
   ( Act(..)
   , Action(..)
@@ -51,6 +49,7 @@ import Control.Coroutine.Interaction
   , react
   , reactConsumerProducer
   ) as Interaction
+import Control.Coroutine.Internal (Coroutine)
 import Control.Coroutine.Producer
   ( Producer(..)
   , ProducerF(..)
@@ -90,6 +89,33 @@ import Control.Coroutine.Transducer
   , (<@%>)
   , (>->)
   ) as Transducer
+import Control.Monad.Except (ExceptT, runExceptT)
+import Control.Monad.Free.Trans (FreeT, freeT)
+import Control.Monad.Free.Trans as FT
+import Control.Monad.Rec.Class (class MonadRec)
+import Custom.Prelude (class Functor, Either(..), either, map, (<#>), (>>>))
+import Data.Bifunctor (bimap)
+import Data.Newtype (class Newtype, over, wrap)
+
+exceptResult
+  ∷ ∀ m e r f t s
+  . Functor f
+  ⇒ MonadRec m
+  ⇒ Newtype t (FreeT f (ExceptT e m) r)
+  ⇒ Newtype s (FreeT f m (Either e r))
+  ⇒ t
+  → s
+exceptResult = over wrap tryExceptCo
+
+tryExceptCo
+  ∷ ∀ m e r f
+  . Functor f
+  ⇒ MonadRec m
+  ⇒ Coroutine f (ExceptT e m) r
+  → Coroutine f m (Either e r)
+tryExceptCo co = freeT \_ →
+  runExceptT (FT.resume co) <#>
+    either (Left >>> Left) (bimap Right (map tryExceptCo))
 
 --------------------------------------------------------------------------------
 -- Branching -------------------------------------------------------------------

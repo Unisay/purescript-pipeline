@@ -119,8 +119,10 @@ derive newtype instance Monad m ⇒ MonadRec (React q r m)
 instance MonadTrans (React q r) where
   lift = wrap <<< lift
 
-react ∷ ∀ q r m. Monad m ⇒ (q → m r) → React q r m Unit
-react f = React $ freeT \_ → pure $ Right $ wrap \q → Tuple <$> f q <@> pass
+react ∷ ∀ q r m. Monad m ⇒ (q → m r) → React q r m r
+react f = React $ freeT \_ → pure $ Right $ wrap \q → do
+  r ← f q
+  pure $ Tuple r $ pure r
 
 reactConsumerProducer
   ∷ ∀ a b m p c
@@ -136,13 +138,17 @@ reactConsumerProducer c p =
 
 dimapReact
   ∷ ∀ a b c d m r
-  . Functor m
-  ⇒ (a → b)
-  → (c → d)
+  . MonadRec m
+  ⇒ (a → m b)
+  → (c → m d)
   → React b c m r
   → React a d m r
-dimapReact ab cd = over React do
-  FT.interpret \r → wrap (ab >>> unwrap r >>> map (lmap cd))
+dimapReact ab cd = over React go
+  where
+  go ft = freeT \_ → FT.resume ft <<#>> \(Reaction bc) →
+    Reaction \a → do
+      Tuple c k ← ab a >>= bc
+      Tuple <$> cd c <@> go k
 
 --------------------------------------------------------------------------------
 -- Interact --------------------------------------------------------------------
